@@ -339,50 +339,6 @@ static void test_intrinsics3()
     printf("%s OK\n", __FUNCTION__);
 }
 
-
-/*
-
- * For process_search__true
-
- Hashmap stop watch: Time = 6253 ms.
-
- Performance counter stats for './main':
-
-       6282.140518      task-clock:u (msec)       #    1.000 CPUs utilized
-                 0      context-switches:u        #    0.000 K/sec
-                 0      cpu-migrations:u          #    0.000 K/sec
-             1,497      page-faults:u             #    0.238 K/sec
-    20,951,621,704      cycles:u                  #    3.335 GHz
-     8,441,156,915      stalled-cycles-frontend:u #   40.29% frontend cycles idle
-    22,928,965,059      instructions:u            #    1.09  insn per cycle
-                                                  #    0.37  stalled cycles per insn
-     3,132,750,570      branches:u                #  498.676 M/sec
-        51,362,603      branch-misses:u           #    1.64% of all branches
-
-       6.283405714 seconds time elapsed
-
-  * For process_search__true__optimized__iter4_bad (no loop, no if-s, no division)
-
-  Hashmap stop watch: Time = 811 ms
-
- Performance counter stats for './main':
-
-        837.306991      task-clock:u (msec)       #    0.999 CPUs utilized
-                 0      context-switches:u        #    0.000 K/sec
-                 0      cpu-migrations:u          #    0.000 K/sec
-               985      page-faults:u             #    0.001 M/sec
-     2,590,100,889      cycles:u                  #    3.093 GHz
-     1,649,576,288      stalled-cycles-frontend:u #   63.69% frontend cycles idle
-     3,220,164,818      instructions:u            #    1.24  insn per cycle
-                                                  #    0.51  stalled cycles per insn
-       188,044,836      branches:u                #  224.583 M/sec
-           157,132      branch-misses:u           #    0.08% of all branches
-
-       0.838234360 seconds time elapsed
-
-    I managed to reach max ~1.37 insn per cycle (only one iteration + no if-s + no modulo)
-
- */
 static void benchmark__only_hashmap_basic_for_member()
 {
     static common::ExperimentalHashmap<200003, common::int_holder> hash_map;

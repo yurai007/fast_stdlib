@@ -1,4 +1,4 @@
-#ifndef SMART_PTR_HPP
+﻿#ifndef SMART_PTR_HPP
 #define SMART_PTR_HPP
 
 #include <utility>
@@ -9,73 +9,6 @@
 namespace smart
 {
 
-/* On the beginning just plain implementation without policies
-
- * 1. Rule of Three
-   - smart_ptr(const smart_ptr &other);
-   - smart_ptr &operator=(const smart_ptr &other)
-   - ~smart_ptr()
-
- * 2. smart_ptr() = delete and it's better then not declaring because
-      compilers tells that "constructor is deleted"
-
- * 3. smart_ptr<char> ptr3(); is OK because it's function declaration:)
-      smart_ptr<char> ptr5 is NOT OK because constructor i deleted
-
- * 4. Trick with nullptr_t for overloaded operators for nullptr
-
- * 5. There is a difference between operator== inside and outside class.
-      Outside operator== takes 2 arguments, inside only 1.
-      Inside operator== requires left value to be smart_ptr.
-
-      It's required to has 3x operator== overloads (and 3x operator!= too)
-      because od nullptr (look at std::shared_ptr)
-
-      Those operators must be friend and in normal case outside class. In this case
-      smart_ptr is template so it must be inside class smart_ptr.
-
- * 6. Rule of Five
-    - smart_ptr(const smart_ptr &&other);
-    - smart_ptr &operator=(smart_ptr &&other);
-
-    thanks to those operators I will enable move semantics for class (std::move will be available)
-    Notice that without move semantics in smart_ptr std::move(ptr) in test_case_move_semantics
-    compiles but during std::move trivial (default) move constructor is called.
-    This is not we want, we must explicitly perform shallow copy, transfer ownership and null src
-    smart_ptr.
-
- * 7. "Free invalid error" if I uncomment std_shared_ptr_tests::test_case().
-      Check this with Asan-em and valgrind-em.
-
-     TO DO: I may pass to smart_ptr internally attach my memory_pool from custom transport
-    + some perf tests
-
- * 8. Brackets around args in std::forward<Args>(args)... are important ( not (args...) ). Without this I get
-     "parameters packs not expanded" error
-
- * 9. When fit_storage_policy gives allocate_storage we can perform whole allocation,
-      and constructor call by placement new with forwarding variadic arguments in smart_make_shared.
-      In consequence smart_ptr code is nice and clean.
-
- * 10. fit_storage_policy::get_ptr must check in some way if common_ptr != nullptr because when
-       common_ptr == nullptr correct value is nullptr not nullptr+1.
-       TO DO: check if get_ptr have conditional move instruction instead branch.
-       Likely/Unlikely may optimize further it.
-
-  *11. When I need copy constructor of smart_ptr<T1> from another smart_ptr<T2> I must
-       express all parameter types explicitly (including storage policy). Without this
-       compiler won't notice this constructor.
-
-  *12. fit_storage_policy::get_counter_ptr() must be public because set_storage for another instatiation
-       of the same template (that's different types so don't have access to protected members !)
-
-  *13. In fit_storage_policy::delete_storage():
-                ((pointer_type)((size_t*)(common_ptr) + 1))->~T();
-       works as expected for Base class because of dynamic binding call to destructor is
-       made by vptr in T so all is OK.
-
-  * Idiom: Reference Counting
- */
 using nullptr_t = decltype(nullptr);
 
 template<class T>
