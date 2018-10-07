@@ -1,14 +1,9 @@
-#include <memory>
+﻿#include <memory>
 #include <cassert>
 #include <iostream>
 
-#include <boost/mpl/vector.hpp>
-#include <boost/mpl/find.hpp>
-#include <boost/mpl/size.hpp>
-#include <boost/mpl/for_each.hpp>
-
 #include "ut_fit_smart_ptr.hpp"
-#include "../common/smart_ptr.hpp"
+#include "smart_ptr.hpp"
 
 namespace smart
 {
@@ -294,97 +289,8 @@ void test_case_constructor_no_make_shared()
 
 }
 
-/*
-   Automatic enumeration for mesages is quite good but has one drawback.
-   Brace initialization doesn't work for derived classes (even POD-s) so I must
-   add explicit constructor for every mesage.
- */
-namespace message_enumerator_proof_of_concept
-{
-    struct message1;
-    struct message2;
-    struct message3;
-    struct message4;
-
-    using registered_types = boost::mpl::vector<message1, message2, message3, message4>;
-
-    template <class T>
-    struct message_numerator
-    {
-        static char message_id()
-        {
-            using iter = typename boost::mpl::find<registered_types, T>::type;
-            static_assert(iter::pos::value < boost::mpl::size<registered_types>::value,
-                          "type is NOT registered");
-            return (char)iter::pos::value;
-        }
-    };
-
-    struct message1 : public message_numerator<message1>
-    {
-    };
-
-    struct message2 : public message_numerator<message2>
-    {
-    };
-
-    struct message3 : public message_numerator<message3>
-    {
-    };
-
-    struct message4 : public message_numerator<message4>
-    {
-        int foo;
-        std::string bar;
-    };
-
-    struct verify
-    {
-        template<typename Msg> void operator()(Msg)
-        {
-            assert((unsigned)Msg::message_id() == counter);
-            counter++;
-        }
-
-        static unsigned counter;
-    };
-
-    unsigned verify::counter = 0;
-
-
-    struct dummy_message_numerator
-    {
-        dummy_message_numerator() = default;
-    };
-
-    struct message : dummy_message_numerator
-    {
-        int foo;
-        std::string bar;
-    };
-
-
-    void test_case()
-    {
-        // Brace initialization doesn't work for message because it has base class so it's not
-        // aggregated. Since it's not an aggregate, it can't be initialized with aggregate initialization.
-        // message msg = {123, "dupa"};
-
-        std::cout << __PRETTY_FUNCTION__ << "\n";
-        // not registered
-        message4::message_id();
-
-//        message4 msg = {123, "dupa"};
-        // not unique
-        boost::mpl::for_each<registered_types>(verify());
-    }
-}
-
-
 void ut_fit_smart_ptr::run_all()
 {
-    message_enumerator_proof_of_concept::test_case();
-
     std::cout << "Running ut_fit_smart_ptr tests...\n";
     test_case_constructor_destructor();
     test_case_make_shared();

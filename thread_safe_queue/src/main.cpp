@@ -1,14 +1,11 @@
-#include <iostream>
+﻿#include <iostream>
 #include <atomic>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include <cassert>
 #include <type_traits>
 #include "pthread.h"
-
-#include "../common/messages.hpp"
-#include "../common/byte_buffer.hpp"
-#include "../common/thread_safe_queue.hpp"
+#include "thread_safe_queue.hpp"
 
 namespace thread_safe_queue_sct
 {
@@ -97,5 +94,11 @@ void test_case()
     std::cout << "All sct_thread_safe_queue tests passed\n";
 }
 
+}
+
+int main()
+{
+    thread_safe_queue_sct::test_case();
+    return 0;
 }
 

@@ -1,8 +1,8 @@
-#ifndef UT_SMART_PTR_H
+﻿#ifndef UT_SMART_PTR_H
 #define UT_SMART_PTR_H
 
 #include <string>
-#include "../common/smart_ptr.hpp"
+#include "smart_ptr.hpp"
 
 namespace smart
 {

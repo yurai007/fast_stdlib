@@ -216,5 +216,6 @@ static void test_case()
 
 int main()
 {
+    sstrings::test_case();
     return 0;
 }

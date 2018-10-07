@@ -1,11 +1,10 @@
-#ifndef SMART_PTR_TESTS_HPP
+﻿#ifndef SMART_PTR_TESTS_HPP
 #define SMART_PTR_TESTS_HPP
 
 #include <memory>
 #include <cassert>
 #include <iostream>
-
-#include "../common/smart_ptr.hpp"
+#include "smart_ptr.hpp"
 
 namespace std_shared_ptr_tests
 {
