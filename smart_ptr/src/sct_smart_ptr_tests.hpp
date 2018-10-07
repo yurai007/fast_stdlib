@@ -1,5 +1,4 @@
-﻿#ifndef SMART_PTR_TESTS_HPP
-#define SMART_PTR_TESTS_HPP
+﻿#pragma once
 
 #include <memory>
 #include <cassert>
@@ -553,8 +552,6 @@ static void test_case()
     std::cout << "All smart_sct tests passed\n";
 }
 
-
 }
 
-#endif // SMART_PTR_TESTS_HPP
 

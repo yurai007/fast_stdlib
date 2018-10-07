@@ -1,16 +1,10 @@
-﻿#include <string.h>
-#include <cstring>
+﻿#include <cstring>
 #include <cassert>
 #include <cstdio>
-#include <utility>
-#include <cassert>
 #include <ctime>
 #include <cstdlib>
-#include <vector>
-#include <map>
-#include <unordered_map>
-#include <algorithm>
-#include <cmath>
+#include <array>
+#include <cstdint>
 
 namespace sstrings
 {

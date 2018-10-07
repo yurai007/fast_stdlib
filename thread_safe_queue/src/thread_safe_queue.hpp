@@ -1,5 +1,4 @@
-#ifndef THREAD_SAFE_QUEUE_HPP
-#define THREAD_SAFE_QUEUE_HPP
+﻿#pragma once
 
 #include <cstdio>
 #include <cstdlib>
@@ -95,5 +94,3 @@ private:
 };
 
 }
-
-#endif // THREAD_SAFE_QUEUE_HPP

@@ -1,20 +1,24 @@
-CXXFLAGS = -Wall -W -Wextra -Wpedantic -Wshadow -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts
-CXXFLAGS += -fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr
-LDFLAGS = 
-CXX := g++
+﻿LDFLAGS = 
+SOURCES :=  ../../src/
 
-correctness_tests: ../../src/correctness_tests.cpp
-	$(CXX) $(CXXFLAGS) ../../src/correctness_tests.cpp -o correctness_tests $(LDFLAGS)
+CXX_SRCS := $(wildcard $(SOURCES)*.cpp)
+OBJS := ${CXX_SRCS:.cpp=.o}
 
-speed_tests: ../../src/speed_tests.cpp 	
-	$(CXX) $(CXXFLAGS) ../../src/speed_tests.cpp -o speed_tests $(LDFLAGS)
+.PHONY: all clean distclean
 
-sstring: ../../src/sstring.cpp
-	$(CXX) $(CXXFLAGS) ../../src/sstring.cpp -o sstring $(LDFLAGS)
+all: $(OBJS)
+	$(CXX) $(CXXFLAGS) $(OBJS) -o main $(LDFLAGS)
 
-all: correctness_tests speed_tests sstring
+clang: 
+	make CXX=clang++ CXXFLAGS='-std=c++2a -Weverything -Wno-c++98-compat -Wpedantic -g \
+		-fsanitize=address -fsanitize=undefined' all
+
+gcc: 
+	make CXX=g++ CXXFLAGS='-Wall -W -Wextra -Wshadow -Wpedantic -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts \
+		-fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr' all
 
 clean:
-	rm -rf correctness_tests speed_tests sstring
+	@- $(RM) main
+	@- $(RM) $(OBJS)
 
 distclean: clean

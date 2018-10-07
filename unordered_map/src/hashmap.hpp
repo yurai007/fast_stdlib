@@ -1,5 +1,4 @@
-﻿#ifndef HASHMAP_HPP
-#define HASHMAP_HPP
+﻿#pragma once
 
 #include <cstdio>
 #include <utility>
@@ -469,5 +468,4 @@ struct Iter3 final
 
 }
 
-#endif // HASHMAP_HPP
 

@@ -1,10 +1,7 @@
 ﻿#include <iostream>
 #include <atomic>
-#include <boost/asio.hpp>
-#include <boost/bind.hpp>
 #include <cassert>
-#include <type_traits>
-#include "pthread.h"
+#include <pthread.h>
 #include "thread_safe_queue.hpp"
 
 namespace thread_safe_queue_sct

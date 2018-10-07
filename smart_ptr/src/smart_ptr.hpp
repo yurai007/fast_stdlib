@@ -1,5 +1,4 @@
-﻿#ifndef SMART_PTR_HPP
-#define SMART_PTR_HPP
+﻿#pragma once
 
 #include <utility>
 #include <cstddef>
@@ -341,7 +340,4 @@ using fit_smart_ptr = smart_ptr<T, fit_storage_policy>;
 
 
 }
-
-
-#endif // SMART_PTR_HPP
 

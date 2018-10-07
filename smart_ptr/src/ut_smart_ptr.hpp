@@ -1,5 +1,4 @@
-﻿#ifndef UT_SMART_PTR_H
-#define UT_SMART_PTR_H
+﻿#pragma once
 
 #include <string>
 #include "smart_ptr.hpp"
@@ -50,5 +49,3 @@ private:
 };
 
 }
-
-#endif // UT_SMART_PTR_H

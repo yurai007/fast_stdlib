@@ -1,4 +1,4 @@
-CXXFLAGS = -Wall -W -Wpedantic -Ofast -std=c++14 -Wshadow -Wformat-security -fconcepts -msse4.1 
+﻿CXXFLAGS = -Wall -W -Wpedantic -Ofast -std=c++14 -Wshadow -Wformat-security -fconcepts -msse4.1 
 LDFLAGS = 
 CXX := g++
 
@@ -17,5 +17,4 @@ clean:
 	rm -rf correctness_tests speed_tests sstring
 
 distclean: clean
-
 

@@ -1,5 +1,4 @@
-#ifndef UT_FIT_SMART_PTR_H
-#define UT_FIT_SMART_PTR_H
+﻿#pragma once
 
 namespace smart
 {
@@ -22,5 +21,3 @@ private:
 };
 
 }
-
-#endif // UT_FIT_SMART_PTR_H
