@@ -1,17 +1,18 @@
-﻿#include <memory>
+﻿#include "ut_fit_smart_ptr.hpp"
+#include "smart_ptr.hpp"
+#include <memory>
 #include <cassert>
 #include <iostream>
 
-#include "ut_fit_smart_ptr.hpp"
-#include "smart_ptr.hpp"
-
 namespace smart
+{
+namespace ut_fit_smart_ptr
 {
 
 template<class T>
 using fit_smart_ptr = smart_ptr<T, fit_storage_policy>;
 
-void ut_fit_smart_ptr::test_case_constructor_destructor()
+static void test_case_constructor_destructor()
 {
     static_assert(sizeof(fit_smart_ptr<int>) == sizeof(void*), "should be equal");
     static_assert(sizeof(fit_smart_ptr<fit_smart_ptr<int>>) == sizeof(void*), "should be equal");
@@ -25,11 +26,11 @@ void ut_fit_smart_ptr::test_case_constructor_destructor()
     static_assert(std::is_same< fit_smart_ptr<int>::countee_type, size_t >::value, "should be true");
     static_assert(std::is_same< fit_smart_ptr<const char>::countee_type, size_t >::value, "should be true");
 
-    //const fit_smart_ptr<const char> ptr1(new char); // elegant compilation error from assert
-    //const fit_smart_ptr<const char> ptr2(nullptr); // elegant compilation error from assert
+    //const fit_smart_ptr<const char> ptr1(new char);
+    //const fit_smart_ptr<const char> ptr2(nullptr);
     const fit_smart_ptr<const char> ptr3(); // that's function declaration!
-    //const fit_smart_ptr<const char> ptr4(NULL); // elegant compilation error from assert
-    //const fit_smart_ptr<const char> ptr5; // elegant compilation error from assert
+    //const fit_smart_ptr<const char> ptr4(NULL);
+    //const fit_smart_ptr<const char> ptr5;
 }
 
 class dummy
@@ -42,7 +43,7 @@ public:
     dummy(int x, double y, const dummy &z) { (void)x, (void)y, (void)z; }
 };
 
-void ut_fit_smart_ptr::test_case_make_shared()
+static void test_case_make_shared()
 {
     const fit_smart_ptr<int> ptr1 = smart_make_shared<int>(45);
     assert(ptr1.use_count() == 1);
@@ -68,7 +69,7 @@ void ut_fit_smart_ptr::test_case_make_shared()
     assert(dummy_ptr4.use_count() == 1);
 }
 
-void ut_fit_smart_ptr::test_case_dereference()
+static void test_case_dereference()
 {
     const fit_smart_ptr<char> ptr1;
     assert(ptr1 == nullptr);
@@ -79,7 +80,7 @@ void ut_fit_smart_ptr::test_case_dereference()
     assert(*ptr2 == 123);
 }
 
-void ut_fit_smart_ptr::test_case_copy_and_assignment()
+static void test_case_copy_and_assignment()
 {
     auto ptr1 = smart_make_shared<char>(45);
     assert(*ptr1 == 45);
@@ -112,7 +113,7 @@ void ut_fit_smart_ptr::test_case_copy_and_assignment()
     assert(*ptr5 == 12);
 }
 
-void ut_fit_smart_ptr::test_case_get()
+static void test_case_get()
 {
     auto ptr1 = smart_make_shared<char>(45);
     assert(ptr1.get() != nullptr);
@@ -143,7 +144,7 @@ void ut_fit_smart_ptr::test_case_get()
     assert(ptr2.get() == nullptr);
 }
 
-void ut_fit_smart_ptr::test_case_use_count()
+static void test_case_use_count()
 {
     auto ptr1 = smart_make_shared<char>(45);
     assert(ptr1.use_count() == 1);
@@ -192,7 +193,7 @@ void ut_fit_smart_ptr::test_case_use_count()
     assert(ptr1.use_count() == 0);
 }
 
-void ut_fit_smart_ptr::test_case_comparisions()
+static void test_case_comparisions()
 {
     auto ptr1 = smart_make_shared<char>(45);
     assert(ptr1 != nullptr);
@@ -226,24 +227,7 @@ void ut_fit_smart_ptr::test_case_comparisions()
     assert(nullptr == ptr1);
 }
 
-//void ut_fit_smart_ptr::rvalue_references_reminder()
-//{
-//    // here we have normal, old l-value references known as references
-//    int foo = 1234;
-//    int &bar = foo;
-//    assert(bar == 1234);
-//    // unfortunately in pre-C++11 it was impossible to take reference to
-//    // r-value (except const&)
-//    //int &baz = 54321; -- compilation error
-//    // now it's possible
-//    int &&baz = 54321;
-//    // but in this case compilation ofc fails (only r-values):
-//    // int &&quk = foo;
-
-//    // So r-values are typically temporaries
-//}
-
-void ut_fit_smart_ptr::test_case_move_semantics()
+static void test_case_move_semantics()
 {
     auto ptr = smart_make_shared<char>(-123);
     assert(*ptr == -123);
@@ -280,7 +264,7 @@ struct node
     fit_smart_ptr<node> dummy;
 };
 
-void test_case_constructor_no_make_shared()
+static void test_case_constructor_no_make_shared()
 {
     // no constructor for pointee (node). So ptr->dummy is not constructed
     // here
@@ -289,7 +273,7 @@ void test_case_constructor_no_make_shared()
 
 }
 
-void ut_fit_smart_ptr::run_all()
+void run_all()
 {
     std::cout << "Running ut_fit_smart_ptr tests...\n";
     test_case_constructor_destructor();
@@ -304,4 +288,5 @@ void ut_fit_smart_ptr::run_all()
     std::cout << "All ut_fit_smart_ptr tests passed\n";
 }
 
+}
 }

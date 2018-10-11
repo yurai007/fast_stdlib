@@ -4,8 +4,8 @@
 
 int main()
 {
-    smart::ut_fit_smart_ptr{}.run_all();
-    smart::ut_smart_ptr{}.run_all();
+    smart::ut_fit_smart_ptr::run_all();
+    smart::ut_smart_ptr::run_all();
     smart_sct::test_case();
     return 0;
 }

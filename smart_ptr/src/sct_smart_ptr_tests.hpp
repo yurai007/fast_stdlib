@@ -8,32 +8,18 @@
 namespace std_shared_ptr_tests
 {
 
-/*
- * shared_ptr, internals are quite complex if you disable pretty printers in gdb. Probably without concurrency
-   implementation would be much simpler.
-
- * every shared_ptr has two atomic counters inside:
-         _M_use_count (which is available by use_count()) and _M_weak_count which is unavailable
-         (but available by debugger :)
-
- * _Atomic_word defined as int in c++/5.3.0/x86_64-unknown-linux-gnu/bits/atomic_word.h
-
- * shared_ptr has rich interface, I don't need so complex interface. What can I do?
-   E.g pass deleter and custom allocator.
-
- */
-void test_case_ok_nullptr()
+static void test_case_ok_nullptr()
 {
     std::make_shared<char>();
 
     std::shared_ptr<char> ptr1(nullptr);
     assert(ptr1 == nullptr);
 
-    std::shared_ptr<char> ptr2(NULL);
-    assert(ptr2 == NULL);
+    std::shared_ptr<char> ptr2(nullptr);
+    assert(ptr2 == nullptr);
 
     std::shared_ptr<char> ptr3;
-    assert(ptr3 == NULL);
+    assert(ptr3 == nullptr);
 
 }
 
@@ -99,8 +85,7 @@ struct raw_shared_ptr
     raw_pi *pi;
 };
 
-
-void test_case_ok()
+static void test_case_ok()
 {
     std::cout << "test_case_ok\n";
     std::shared_ptr<char> ptr_to_char1(new char);
@@ -132,8 +117,7 @@ void test_case_ok()
            ptr_to_char2.use_count() == 2);
 }
 
-
-void test_case_ub_nok()
+static void test_case_ub_nok()
 {
     std::cout << "test_case_ub_nok\n";
     std::shared_ptr<char> ptr_to_char1(new char);
@@ -157,8 +141,7 @@ void test_case_ub_nok()
            ptr_to_char3.use_count() == 1);
 }
 
-
-void test_case_weak_ptr()
+static void test_case_weak_ptr()
 {
     std::cout << "test_case_weak_ptr\n";
     std::shared_ptr<char> ptr_to_char1(new char);
@@ -177,7 +160,7 @@ void test_case_weak_ptr()
 }
 
 // shared_ptr has another layout with std::make_shared
-void test_case_make_shared()
+static void test_case_make_shared()
 {
     std::cout << "test_case_weak_ptr\n";
     auto ptr_to_char1 = std::make_shared<char>();
@@ -185,7 +168,7 @@ void test_case_make_shared()
     std::cout << "Use counts:		" << ptr_to_char1.use_count() << "\n";
 }
 
-void test_move_semantics()
+static void test_move_semantics()
 {
     auto ptr = std::make_shared<int>(-123);
     assert(*ptr == -123);
@@ -197,7 +180,7 @@ void test_move_semantics()
 }
 
 
-void test_case()
+static void test_case()
 {
     test_case_ok_nullptr();
     test_case_ok();

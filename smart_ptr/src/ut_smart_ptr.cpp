@@ -1,4 +1,4 @@
-#include <memory>
+﻿#include <memory>
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -11,7 +11,10 @@
 namespace smart
 {
 
-void ut_smart_ptr::test_case_constructor_destructor()
+namespace ut_smart_ptr
+{
+
+static void test_case_constructor_destructor()
 {
     static_assert(sizeof(smart_ptr<int>) == sizeof(void*) + sizeof(void*), "should be equal");
     static_assert(sizeof(smart_ptr<smart_ptr<int>>) == sizeof(void*) + sizeof(void*),
@@ -36,7 +39,7 @@ void ut_smart_ptr::test_case_constructor_destructor()
     const smart_ptr<const char> ptr5;
 }
 
-void ut_smart_ptr::test_case_dereference()
+static void test_case_dereference()
 {
     const smart_ptr<char> ptr1;
     assert(ptr1 == nullptr);
@@ -47,7 +50,7 @@ void ut_smart_ptr::test_case_dereference()
     assert(*ptr2 == 123);
 }
 
-void ut_smart_ptr::test_case_copy_and_assignment()
+static void test_case_copy_and_assignment()
 {
     smart_ptr<char> ptr1(new char(45));
     assert(*ptr1 == 45);
@@ -77,7 +80,7 @@ void ut_smart_ptr::test_case_copy_and_assignment()
     assert(*ptr5 == 12);
 }
 
-void ut_smart_ptr::test_case_get()
+static void test_case_get()
 {
     smart_ptr<char> ptr1(new char(45));
     assert(ptr1.get() != nullptr);
@@ -108,7 +111,7 @@ void ut_smart_ptr::test_case_get()
     assert(ptr2.get() == nullptr);
 }
 
-void ut_smart_ptr::test_case_use_count()
+static void test_case_use_count()
 {
     smart_ptr<char> ptr1(new char(45));
     assert(ptr1.use_count() == 1);
@@ -157,7 +160,7 @@ void ut_smart_ptr::test_case_use_count()
     assert(ptr1.use_count() == 0);
 }
 
-void ut_smart_ptr::test_case_comparisions()
+static void test_case_comparisions()
 {
     smart_ptr<char> ptr1(new char(45));
     assert(ptr1 != nullptr);
@@ -191,24 +194,7 @@ void ut_smart_ptr::test_case_comparisions()
     assert(nullptr == ptr1);
 }
 
-void ut_smart_ptr::rvalue_references_reminder()
-{
-    // here we have normal, old l-value references known as references
-    int foo = 1234;
-    int &bar = foo;
-    assert(bar == 1234);
-    // unfortunately in pre-C++11 it was impossible to take reference to
-    // r-value (except const&)
-    //int &baz = 54321; -- compilation error
-    // now it's possible
-    int &&baz = 54321; (void)baz;
-    // but in this case compilation ofc fails (only r-values):
-    // int &&quk = foo;
-
-    // So r-values are typically temporaries
-}
-
-void ut_smart_ptr::test_case_move_semantics()
+static void test_case_move_semantics()
 {
     smart_ptr<int> ptr(new int(-123));
     assert(*ptr == -123);
@@ -240,8 +226,6 @@ void ut_smart_ptr::test_case_move_semantics()
     assert(ptr.use_count() == 2);
 }
 
-
-
 struct Base
 {
     virtual std::string get_name() = 0;
@@ -267,7 +251,7 @@ struct base_vptr
     size_t **vptr;
 };
 
-void ut_smart_ptr::dump_vtable(size_t **vptr, unsigned n)
+static void dump_vtable(size_t **vptr, unsigned n)
 {
     std::cout << "v-ptr: " << vptr << "\n";
     size_t *vtable = (size_t*)((vptr));
@@ -275,7 +259,7 @@ void ut_smart_ptr::dump_vtable(size_t **vptr, unsigned n)
         std::cout << "v-table[" << i << "]: " <<  std::hex << vtable[i] << "\n";
 }
 
-void ut_smart_ptr::test_case_simple_polymorphism()
+static void test_case_simple_polymorphism()
 {
     // just plain pointer
     Base *ptr1 = new Derived1();
@@ -354,7 +338,7 @@ struct client_enemy : public game_object, public drawable
         {drawable_buffer = "client_enemy.draw";}
 };
 
-void ut_smart_ptr::some_dummy_helper__plain(drawable* object)
+static void some_dummy_helper__plain(drawable* object)
 {
     assert(typeid(*object) == typeid(client_player));
     assert(object->drawable_buffer == "");
@@ -365,7 +349,7 @@ void ut_smart_ptr::some_dummy_helper__plain(drawable* object)
     assert(buffer == "client_player.load_image");
 }
 
-void ut_smart_ptr::some_dummy_helper__smart_ptr(smart::smart_ptr<client_player> object)
+static void some_dummy_helper__smart_ptr(smart::smart_ptr<client_player> object)
 {
     assert(typeid(*object) == typeid(client_player));
     assert(object->drawable_buffer == "");
@@ -378,7 +362,7 @@ void ut_smart_ptr::some_dummy_helper__smart_ptr(smart::smart_ptr<client_player> 
 
 using vtable_drawable = void (*)(drawable*);
 
-void ut_smart_ptr::some_dummy_helper__plain_vptr_magic(drawable* object)
+static void some_dummy_helper__plain_vptr_magic(drawable* object)
 {
     assert(typeid(*object) == typeid(client_player));
     assert(object->drawable_buffer == "");
@@ -394,7 +378,7 @@ void ut_smart_ptr::some_dummy_helper__plain_vptr_magic(drawable* object)
 }
 
 
-void ut_smart_ptr::test_case__little_more_advanced_polymorphism__plain()
+static void test_case__little_more_advanced_polymorphism__plain()
 {
     std::cout << "\nStart " << __FUNCTION__ << "\n";
     std::vector<client_player*> players;
@@ -417,7 +401,7 @@ void ut_smart_ptr::test_case__little_more_advanced_polymorphism__plain()
     std::cout << __FUNCTION__ << " verdict: OK\n";
 }
 
-void ut_smart_ptr::test_case__little_more_advanced_polymorphism__smart_ptr()
+static void test_case__little_more_advanced_polymorphism__smart_ptr()
 {
     std::cout << "\nStart " << __FUNCTION__ << "\n";
     std::vector<smart::smart_ptr<client_player>> players;
@@ -435,7 +419,7 @@ void ut_smart_ptr::test_case__little_more_advanced_polymorphism__smart_ptr()
     std::cout << __FUNCTION__ << " verdict: OK\n";
 }
 
-void ut_smart_ptr::some_dummy_helper__fit_magic_and_workaround(smart::fit_smart_ptr<drawable> object)
+static void some_dummy_helper__fit_magic_and_workaround(smart::fit_smart_ptr<drawable> object)
 {
     assert(typeid(*object.get()) == typeid(client_player));
     assert(object->drawable_buffer == "");
@@ -451,7 +435,7 @@ void ut_smart_ptr::some_dummy_helper__fit_magic_and_workaround(smart::fit_smart_
     assert(buffer == "client_player.load_image");
 }
 
-void ut_smart_ptr::test_case__little_more_advanced_polymorphism__fit()
+static void test_case__little_more_advanced_polymorphism__fit()
 {
     std::cout << "\nStart " << __FUNCTION__ << "\n";
     std::vector<fit_smart_ptr<client_player>> players;
@@ -478,7 +462,7 @@ void ut_smart_ptr::test_case__little_more_advanced_polymorphism__fit()
     std::cout << __FUNCTION__ << " verdict: OK\n";
 }
 
-void ut_smart_ptr::run_all()
+void run_all()
 {
     std::cout << "Running ut_smart_ptr tests...\n";
     test_case_constructor_destructor();
@@ -487,7 +471,6 @@ void ut_smart_ptr::run_all()
     test_case_get();
     test_case_use_count();
     test_case_comparisions();
-    rvalue_references_reminder();
     test_case_move_semantics();
 
     test_case_simple_polymorphism();
@@ -495,6 +478,8 @@ void ut_smart_ptr::run_all()
     test_case__little_more_advanced_polymorphism__smart_ptr();
     test_case__little_more_advanced_polymorphism__fit();
     std::cout << "All ut_smart_ptr tests passed\n";
+}
+
 }
 
 }

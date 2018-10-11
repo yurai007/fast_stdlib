@@ -114,12 +114,12 @@ public:
     {
         common_ptr = new char[(sizeof(countee_type) + sizeof(T))];
         reset_counter();
-        return (pointer_type)((size_t*)(common_ptr) + 1);
+        return (pointer_type)(static_cast<size_t*>(common_ptr) + 1);
     }
 
     counter_type get_counter_ptr() const
     {
-        return (size_t*)common_ptr;
+        return static_cast<size_t*>(common_ptr);
     }
 
 protected:
@@ -131,7 +131,7 @@ protected:
 
     inline pointer_type get_ptr() const
     {
-        return (pointer_type)((size_t*)(common_ptr) + 1*(common_ptr != 0));
+        return (pointer_type)(static_cast<size_t*>(common_ptr) + 1*(common_ptr != nullptr));
     }
 
     void dec_counter()
@@ -167,15 +167,15 @@ protected:
 
     void delete_storage()
     {
-        ((pointer_type)((size_t*)(common_ptr) + 1))->~T();
-        delete[] (char*)(common_ptr);
+        ((pointer_type)(static_cast<size_t*>(common_ptr) + 1))->~T();
+        delete[] static_cast<char*>(common_ptr);
     }
 
 private:
 
     void reset_counter()
     {
-        *((size_t*)common_ptr) = 1;
+        *(static_cast<size_t*>(common_ptr)) = 1;
     }
 
     void *common_ptr;
