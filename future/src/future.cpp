@@ -6,6 +6,8 @@
 #include <iostream>
 #include <cassert>
 
+#define FWD(...) ::std::forward<decltype(__VA_ARGS__)>(__VA_ARGS__)
+
 class state_base {
 public:
     virtual void _M_complete_async() {
@@ -67,7 +69,7 @@ public:
 
     template<class Func>
     future_void(Func &&func, async_policy policy)
-        : _M_state(alocate_state<Func>(std::forward<Func>(func), policy))
+        : _M_state(alocate_state<Func>(FWD(func), policy))
     {}
 
     void wait() {
@@ -81,9 +83,9 @@ private:
     template<class Func>
     static inline shared_ptr<state_base> alocate_state(Func &&func, async_policy policy) {
         if (policy == async_policy::deffered)
-            return std::make_shared<deffered_state<Func>>(std::forward<Func>(func));
+            return std::make_shared<deffered_state<Func>>(FWD(func));
         else
-            return std::make_shared<async_state<Func>>(std::forward<Func>(func));
+            return std::make_shared<async_state<Func>>(FWD(func));
     }
 };
 
@@ -109,7 +111,7 @@ public:
 template<typename Func>
 [[nodiscard]] inline auto async_void(Func&& f, async_policy policy = async_policy::deffered)
 {
-    return future_void(std::forward<Func>(f), policy);
+    return future_void(FWD(f), policy);
 }
 
 template<typename Ret>
@@ -283,9 +285,110 @@ static void test_async()
     }
 }
 
+// ref: https://vittorioromeo.info/index/blog/zeroalloc_continuations_p0.html
+
+struct root {};
+
+template <typename Parent, typename F>
+struct node;
+
+template <typename F>
+auto initiate(F&& f)
+{
+    return node{root{}, FWD(f)};
+}
+
+template <typename Parent, typename F>
+struct node : Parent, F
+{
+    template <typename ParentFwd, typename FFwd>
+    node(ParentFwd&& p, FFwd&& f) : Parent{FWD(p)}, F{FWD(f)}
+    {}
+
+    auto& as_parent() noexcept
+    {
+        return static_cast<Parent&>(*this);
+    }
+
+    auto& as_f() noexcept
+    {
+        return static_cast<F&>(*this);
+    }
+
+    void call_with_parent()
+    {
+        if constexpr(std::is_same_v<Parent, root>)
+        {
+            // ok, we are in root call lambda<>::operator()
+            as_f()();
+        }
+        else
+        {
+            // we are not in root, we have parent (base) class so delegate to it
+            as_f()(as_parent());
+        }
+    }
+
+    template <typename FThen>
+    auto then(FThen&& f_then)
+    {
+        return ::node{std::move(*this),
+            [f_then = FWD(f_then)](auto& parent) mutable
+            {
+                parent.call_with_parent();
+                return f_then();
+            }};
+    }
+
+    template <typename Scheduler>
+    void execute(Scheduler&& s)
+    {
+        s([this]() -> decltype(auto)
+        {
+            call_with_parent();
+        });
+    }
+};
+
+template <typename ParentFwd, typename FFwd>
+node(ParentFwd&&, FFwd&&)
+    -> node<std::decay_t<ParentFwd>, std::decay_t<FFwd>>;
+
+struct inline_scheduler
+{
+    template <typename F>
+    void operator()(F&& f) const
+    {
+        f();
+    }
+};
+
+static void test_inline_then_concept()
+{
+    {
+        // creates node<root, lambda<>> which is derived from lambda,
+        // so callable is stored inside lambda
+        auto f = initiate([]{
+            std::cout << "init\n";
+        })
+        .then([](){
+             std::cout << "and then...\n";
+        })
+        .then([](){
+             std::cout << "and finally we are here.\n";
+        });
+
+        // execute() -> synchronous_scheduler::operator() ->
+        //           -> call_with_parent() -> as_f()(as_parent()) ->
+        // lambda()::operator()
+       f.execute(inline_scheduler{});
+    }
+}
+
 int main()
 {
     test_basics();
     test_async();
+    test_inline_then_concept();
     return 0;
 }
