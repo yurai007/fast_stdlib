@@ -9,19 +9,113 @@
 #include <condition_variable>
 
 template<class T>
+class raw_queue
+{
+public:
+    raw_queue() = default;
+    raw_queue(const raw_queue&) = delete;
+    raw_queue& operator=(const raw_queue&) = delete;
+
+    void push(T new_value)
+    {
+        node *new_tail = new node;
+        new_tail->value = new_value;
+        new_tail->next = nullptr;
+        if (tail != nullptr)
+            tail->next = new_tail;
+        else
+            head = new_tail;
+        tail = new_tail;
+    }
+
+    bool try_pop(T &value)
+    {
+        if (empty())
+            return false;
+        value = head->value;
+        node *old_head = head;
+        head = head->next;
+        if (tail == old_head)
+            tail = nullptr;
+        delete old_head;
+        return true;
+    }
+
+    bool empty() const
+    {
+        return head == nullptr;
+    }
+
+private:
+    struct node
+    {
+        node *next;
+        T value;
+    };
+    node *head {nullptr}, *tail {nullptr};
+};
+
+
+template<class T>
+class std_shared_ptr_queue
+{
+public:
+    std_shared_ptr_queue() = default;
+    std_shared_ptr_queue(const std_shared_ptr_queue&) = delete;
+    std_shared_ptr_queue& operator=(const std_shared_ptr_queue&) = delete;
+
+    void push(T new_value)
+    {
+        auto new_tail = std::make_shared<node>();
+        new_tail->value = new_value;
+        new_tail->next = nullptr;
+        if (tail != nullptr)
+            tail->next = new_tail;
+        else
+            head = new_tail;
+        tail = new_tail;
+    }
+
+    bool try_pop(T &value)
+    {
+        if (empty())
+            return false;
+        value = std::move(head->value);
+        auto old_head = head;
+        head = std::move(head->next);
+        if (tail == old_head)
+            tail = nullptr;
+        return true;
+    }
+
+    bool empty() const
+    {
+        return head == nullptr;
+    }
+
+private:
+    struct node
+    {
+        std::shared_ptr<node> next;
+        T value;
+    };
+    std::shared_ptr<node> head, tail;
+};
+
+template<class T>
 class std_thread_safe_queue
 {
 public:
     void push(T new_value)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard lock(mutex_);
         queue_.push(std::move(new_value));
         cv_.notify_one();
     }
 
     std::shared_ptr<T> front_and_pop()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::unique_lock lock(mutex_);
         cv_.wait(lock, [this]{ return !queue_.empty(); });
         auto result = std::make_shared<T>(std::move(queue_.front()));
         queue_.pop();
@@ -32,7 +126,6 @@ private:
     std::queue<T> queue_;
     std::condition_variable cv_;
 };
-
 
 template<class T>
 class thread_safe_queue
@@ -131,7 +224,7 @@ public:
 
     node *get_tail()
     {
-        std::lock_guard<std::mutex> tail_lock(tail_mutex);
+        std::lock_guard tail_lock(tail_mutex);
         return tail;
     }
 
@@ -142,7 +235,7 @@ public:
         node *new_dummy_tail = new node;
         new_dummy_tail->next = nullptr;
 
-        std::lock_guard<std::mutex> tail_lock(tail_mutex);
+        std::lock_guard tail_lock(tail_mutex);
         tail->value = new_value;
         tail->next = new_dummy_tail;
         tail = new_dummy_tail;
@@ -150,7 +243,7 @@ public:
 
     node *pop_head()
     {
-        std::lock_guard<std::mutex> head_lock(head_mutex);
+        std::lock_guard head_lock(head_mutex);
         if (head == get_tail())
             return nullptr;
         node *old_head = head;
@@ -171,7 +264,7 @@ public:
             return false;
     }
 
-    bool empty()
+    bool empty() const
     {
         return head == tail;
     }

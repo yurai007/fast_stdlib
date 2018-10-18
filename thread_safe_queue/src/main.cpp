@@ -1,4 +1,4 @@
-﻿#include "thread_safe_queue.hpp"
+﻿#include "queues.hpp"
 #include <iostream>
 #include <atomic>
 #include <cassert>

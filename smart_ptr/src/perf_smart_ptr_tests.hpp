@@ -3,6 +3,8 @@
 #include <memory>
 #include <cassert>
 #include <iostream>
+#include "../../thread_safe_queue/src/queues.hpp"
+#include "../../thread_safe_queue/src/test_utils.hpp"
 #include "smart_ptr.hpp"
 
 namespace std_shared_ptr_tests
@@ -22,55 +24,6 @@ static void test_case_ok_nullptr()
     assert(ptr3 == nullptr);
 
 }
-
-/*
-
-template<typename Tp>
-class shared_ptr : public __shared_ptr_base<Tp>
-{
-}
-
-template<typename Tp>
-class __shared_ptr_base
-{
-    _Tp*	   	   _M_ptr;         // Contained pointer.
-    __shared_count<_Lp>  _M_refcount;    // Reference counter.
-}
-
-template<_Lock_policy _Lp>
-class __shared_count
-{
-    _Sp_counted_base<_Lp>*  _M_pi;
-}
-
-template<_Lock_policy _Lp = __default_lock_policy>
-class _Sp_counted_base : public _Mutex_base<_Lp>
-{
-    _Atomic_word  _M_use_count;     // #shared
-    _Atomic_word  _M_weak_count;    // #weak + (#shared != 0)
-    vptr;
-}
-
-template<_Lock_policy _Lp>
-class _Mutex_base
-{
-protected:
-    // The atomic policy uses fully-fenced builtins, single doesn't care.
-    enum { _S_need_barriers = 0 };
-};
-
-Whole picture:
-
-template<typename T>
-class shared_ptr
-{
-    T*	   	   _M_ptr;         // Contained pointer.
-    _Sp_counted_base<_Lp>*  _M_pi
-}
-
-So that's only 2 pointers
-
- */
 
 struct raw_pi
 {
@@ -192,45 +145,8 @@ static void test_case()
 
 }
 
-
-namespace smart_sct
+namespace smart_perf
 {
-
-template <template <class> class queue_sut>
-class producer_consumer_test
-{
-public:
-    void run_test()
-    {
-        producer();
-        consumer();
-        std::cout << "Verdict: OK\n";
-    }
-
-private:
-    void producer()
-    {
-        for (int i = 0; i < iterations; i++)
-        {
-            my_queue.push(i);
-        }
-    }
-
-    void consumer()
-    {
-        while (!my_queue.empty())
-        {
-            int value = 0;
-            my_queue.try_pop(value);
-            sum += value;
-        }
-        assert(sum == iterations*(iterations-1)/2);
-    }
-
-    queue_sut<int> my_queue;
-    constexpr static long iterations {2000000};
-    long sum {0};
-};
 
 /*
 <RAW_QUEUE>
@@ -322,105 +238,6 @@ Hot spot here is memory allocation/deallocation and allocations number has big i
 on benchmark times. Memory allocation is heavy because of many branches/locks/work inside.
 
 */
-template<class T>
-class raw_queue
-{
-    struct node
-    {
-        node *next;
-        T value;
-    };
-
-public:
-
-    raw_queue() :
-        head(nullptr),
-        tail(nullptr)
-    {}
-
-    void push(T new_value)
-    {
-        node *new_tail = new node;
-        new_tail->value = new_value;
-        new_tail->next = nullptr;
-        if (tail != nullptr)
-            tail->next = new_tail;
-        else
-            head = new_tail;
-        tail = new_tail;
-    }
-
-    bool try_pop(T &value)
-    {
-        if (empty())
-            return false;
-        value = head->value;
-        node *old_head = head;
-        head = head->next;
-        if (tail == old_head)
-            tail = nullptr;
-        delete old_head;
-        return true;
-    }
-
-    bool empty()
-    {
-        return head == nullptr;
-    }
-
-private:
-    node *head, *tail;
-};
-
-
-template<class T>
-class std_shared_ptr_queue
-{
-    struct node
-    {
-        std::shared_ptr<node> next;
-        T value;
-    };
-
-public:
-    std_shared_ptr_queue() :
-        head(nullptr),
-        tail(nullptr)
-    {}
-
-    void push(T new_value)
-    {
-        auto new_tail = std::make_shared<node>();
-        new_tail->value = new_value;
-        new_tail->next = nullptr;
-        if (tail != nullptr)
-            tail->next = new_tail;
-        else
-            head = new_tail;
-        tail = new_tail;
-    }
-
-    bool try_pop(T &value)
-    {
-        if (empty())
-            return false;
-        value = std::move(head->value);
-        auto old_head = head;
-        head = std::move(head->next);
-        if (tail == old_head)
-            tail = nullptr;
-        return true;
-    }
-
-    bool empty()
-    {
-        return head == nullptr;
-    }
-
-private:
-    std::shared_ptr<node> head, tail;
-};
-
 using smart::smart_ptr;
 
 template<class T>
@@ -526,13 +343,13 @@ private:
 static void test_case()
 {
   //  std_shared_ptr_tests::test_case();
-    std::cout << "Running smart_sct tests...\n";
-    producer_consumer_test<raw_queue>().run_test();
-    producer_consumer_test<std_shared_ptr_queue>().run_test();
+    std::cout << "Running perf tests...\n";
+    sequential_producer_consumer_test<raw_queue>().run_test();
+    sequential_producer_consumer_test<std_shared_ptr_queue>().run_test();
 
-    producer_consumer_test<smart_ptr_queue>().run_test();
-    producer_consumer_test<fit_smart_ptr_queue>().run_test();
-    std::cout << "All smart_sct tests passed\n";
+    sequential_producer_consumer_test<smart_ptr_queue>().run_test();
+    sequential_producer_consumer_test<fit_smart_ptr_queue>().run_test();
+    std::cout << "All perf tests passed\n";
 }
 
 }
