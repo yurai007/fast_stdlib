@@ -16,6 +16,7 @@ public:
     }
     virtual ~state_base() = default;
     void _M_set_result() {
+        std::lock_guard __lock(_M_mutex);
         _M_status = status::ready;
         _M_cond.notify_all();
     }
