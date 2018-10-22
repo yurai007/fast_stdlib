@@ -151,7 +151,7 @@ public:
         pthread_mutex_unlock(&mutex);
     }
 
-    bool try_pop(T *value)
+    bool try_pop(T &value)
     {
         pthread_mutex_lock(&mutex);
         if (internal_empty())
@@ -159,7 +159,7 @@ public:
             pthread_mutex_unlock(&mutex);
             return false;
         }
-        *value = head->value;
+        value = head->value;
         auto old_head = head;
         head = head->next;
         if (tail == old_head)

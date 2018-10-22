@@ -344,11 +344,11 @@ static void test_case()
 {
   //  std_shared_ptr_tests::test_case();
     std::cout << "Running perf tests...\n";
-    sequential_producer_consumer_test<raw_queue>().run_test();
-    sequential_producer_consumer_test<std_shared_ptr_queue>().run_test();
+    producer_consumer_test<raw_queue>().sequential_test();
+    producer_consumer_test<std_shared_ptr_queue>().sequential_test();
 
-    sequential_producer_consumer_test<smart_ptr_queue>().run_test();
-    sequential_producer_consumer_test<fit_smart_ptr_queue>().run_test();
+    producer_consumer_test<smart_ptr_queue>().sequential_test();
+    producer_consumer_test<fit_smart_ptr_queue>().sequential_test();
     std::cout << "All perf tests passed\n";
 }
 
