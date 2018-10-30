@@ -27,8 +27,10 @@ private:
 
     std::mutex               	_M_mutex;
     std::condition_variable  	_M_cond;
-    enum class status : unsigned char {ready, not_ready};
-    status _M_status {status::not_ready};
+    enum class status : unsigned char
+    {
+        ready, not_ready
+    } _M_status {status::not_ready};
 };
 
 template<class function = std::function<void(void)>>
@@ -215,5 +217,26 @@ struct inline_scheduler
         f();
     }
 };
+
+
+template<class T>
+class future;
+
+template <typename... T>
+struct is_future : std::false_type {};
+
+template <typename... T>
+struct is_future<future<T...>> : std::true_type {};
+
+template <typename T>
+concept bool Future = is_future<T>::value;
+
+template <typename Func, typename... T>
+concept bool CanApply = requires (Func f, T... args) {
+    f(std::forward<T>(args)...);
+};
+
+template <typename... U, typename... Args>
+future<U...> make_ready_future(Args &&... value);
 
 }
