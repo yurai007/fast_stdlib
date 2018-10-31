@@ -472,9 +472,30 @@ namespace executors {
 static void basic_test() {
     execution::inline_executor executor;
     auto agent = execution::require(executor, execution::single, execution::oneway);
-    agent.execute([](){
-        assert(true);
+    auto done = false;
+    agent.execute([&done](){
+        done = true;
     });
+    assert(done);
+}
+
+static void oneway_test() {
+    std::array<std::atomic<unsigned>, 4> sums = {0u, 0u, 0u, 0u};
+    constexpr auto tasks = 10000u; //10000000u;
+    auto t0 = realtime_now();
+    {
+        execution::static_thread_pool pool {4};
+        for (auto i : boost::irange(0u, tasks))
+        {
+            pool.oneway_execute([i, &sums](){
+                sums[i%4] += i;
+            });
+        }
+        pool.start();
+    }
+    auto t1 = realtime_now();
+    std::cout << "sum: " << sums[0] + sums[1] + sums[2] + sums[3] << std::endl;
+    std::cout << "time: " << (t1 - t0)/10000000u << "ms" << std::endl;
 }
 
 namespace twoway_test {
@@ -557,6 +578,7 @@ int main()
     perf_test_threads_after();
 
     executors::basic_test();
+    executors::oneway_test();
     executors::twoway_test::tests();
     return 0;
 }
