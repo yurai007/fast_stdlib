@@ -88,6 +88,8 @@ static double sumLeibnitzPararell(unsigned n)
             return sumLeibnitzBetween(i, i + step - 1);
         }));
     }
+    pool.start();
+
     for (auto &&p : partials)
     {
         result += p.get();

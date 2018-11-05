@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <variant>
 
 namespace execution {
 
@@ -67,7 +68,7 @@ public:
 
         template <class Function>
         [[nodiscard]] inline auto twoway_execute(Function &&f) const noexcept {
-            return std::future<std::result_of_t<std::decay_t<Function>()>>{};
+            return pool_.twoway_execute(FWD(f));
         }
 
         template <class Function>
@@ -88,6 +89,7 @@ public:
     };
 
     using executor_type = static_thread_pool_executor;
+    using task = std::variant<std::packaged_task<double()>, std::function<void()>>;
 
     executor_type executor() noexcept {
         return static_thread_pool_executor{*this};
@@ -98,8 +100,14 @@ public:
             threads_.emplace_back([i, this](){
                 while (!_queues[i].empty())
                 {
-                    auto task = _queues[i].front_and_pop();
-                    (*task)();
+                    task task_;
+                    try {
+                        task_ = std::move(*_queues[i].front_and_pop());
+                        std::get<0>(task_)();
+                    }
+                    catch (std::bad_variant_access&) {
+                        std::get<1>(task_)();
+                    }
                 }
             });
     }
@@ -110,6 +118,15 @@ public:
         _queues[i].push(FWD(f));
     }
 
+    template <class Function>
+    [[nodiscard]] inline auto twoway_execute(Function &&f) noexcept {
+        std::packaged_task<decltype(f())()> task(std::move(f));
+        std::future<decltype(f())> future = task.get_future();
+        const auto i = (counter++) % cores;
+        _queues[i].push(std::move(task));
+        return future;
+    }
+
     ~static_thread_pool() {
         for (auto &&thread : threads_)
             thread.join();
@@ -118,7 +135,7 @@ public:
 private:
     const unsigned cores = std::thread::hardware_concurrency();
     std::vector<std::thread> threads_;
-    std::vector<std_thread_safe_queue<std::function<void()>>> _queues {cores};
+    std::vector<std_thread_safe_queue<task>> _queues {cores};
     std::atomic<unsigned> counter {0u};
 };
 
