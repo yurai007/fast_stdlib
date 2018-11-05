@@ -228,6 +228,7 @@ struct is_future : std::false_type {};
 template <typename... T>
 struct is_future<future<T...>> : std::true_type {};
 
+#ifndef __clang__
 template <typename T>
 concept bool Future = is_future<T>::value;
 
@@ -235,6 +236,7 @@ template <typename Func, typename... T>
 concept bool CanApply = requires (Func f, T... args) {
     f(std::forward<T>(args)...);
 };
+#endif
 
 template <typename... U, typename... Args>
 future<U...> make_ready_future(Args &&... value);

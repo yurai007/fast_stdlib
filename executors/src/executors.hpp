@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "../../thread_safe_queue/src/queues.hpp"
-#include "future.hpp"
+#include "../../future/src/future.hpp"
 #include <boost/range/irange.hpp>
 #include <future>
 #include <functional>
@@ -53,42 +53,40 @@ public:
     }
 };
 
-class static_thread_pool;
-
-class static_thread_pool_executor final {
-public:
-    static_thread_pool_executor(static_thread_pool &pool)
-        : pool_(pool) {}
-
-    template <class Function>
-    [[nodiscard]] inline auto twoway_execute(Function &&f) const noexcept {
-        return std::future<std::result_of_t<std::decay_t<Function>()>>{};
-    }
-
-    template <class Function>
-    inline void oneway_execute(Function &&f) const noexcept {
-        pool_.oneway_execute(FWD(f));
-    }
-
-    friend bool operator==(const static_thread_pool_executor&a, const static_thread_pool_executor&b) noexcept {
-        return &a.pool_ == &b.pool_;
-    }
-
-    friend bool operator!=(const static_thread_pool_executor&a, const static_thread_pool_executor&b) noexcept {
-        return &a.pool_ != &b.pool_;
-    }
-
-private:
-    static_thread_pool& pool_;
-};
-
 class static_thread_pool {
 public:
     static_thread_pool(const static_thread_pool&) = delete;
     static_thread_pool& operator=(const static_thread_pool&) = delete;
     static_thread_pool(unsigned threads) {
-
     }
+
+    class static_thread_pool_executor final {
+    public:
+        static_thread_pool_executor(static_thread_pool &pool)
+            : pool_(pool) {}
+
+        template <class Function>
+        [[nodiscard]] inline auto twoway_execute(Function &&f) const noexcept {
+            return std::future<std::result_of_t<std::decay_t<Function>()>>{};
+        }
+
+        template <class Function>
+        inline void oneway_execute(Function &&f) const noexcept {
+            pool_.oneway_execute(FWD(f));
+        }
+
+        friend bool operator==(const static_thread_pool_executor&a, const static_thread_pool_executor&b) noexcept {
+            return &a.pool_ == &b.pool_;
+        }
+
+        friend bool operator!=(const static_thread_pool_executor&a, const static_thread_pool_executor&b) noexcept {
+            return &a.pool_ != &b.pool_;
+        }
+
+    private:
+        static_thread_pool& pool_;
+    };
+
     using executor_type = static_thread_pool_executor;
 
     executor_type executor() noexcept {
