@@ -69,7 +69,8 @@ public:
     future_void() = default;
     future_void(const future_void&) = delete;
     future_void& operator=(const future_void&) = delete;
-    future_void(const shared_ptr<state_base> &state, bool) : _M_state(state) {}
+    future_void(const shared_ptr<state_base> &state, bool) noexcept
+        : _M_state(state) {}
 
     template<class Func>
     future_void(Func &&func, async_policy policy)
@@ -80,7 +81,7 @@ public:
         _M_state->_M_complete_async();
         _M_state = nullptr;
     }
-    bool valid() const {
+    bool valid() const noexcept {
         return static_cast<bool>(_M_state);
     }
 private:
@@ -130,7 +131,7 @@ struct lightweight_stateless_function
     {
         return m_func();
     }
-    operator bool() const
+    operator bool() const noexcept
     {
         return m_func != nullptr;
     }

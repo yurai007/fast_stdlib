@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <climits>
 #include <atomic>
+#include <memory>
 
 static inline uint64_t realtime_now()
 {
@@ -28,6 +29,13 @@ static void test_basics()
         static_assert(std::is_copy_constructible<decltype(f)>::value == false);
         static_assert(std::is_assignable<decltype(f), decltype(f)>::value == false);
         static_assert(std::is_move_assignable<decltype(f)>::value == false);
+
+        // some extra noexcept properties
+        static_assert(std::is_nothrow_default_constructible<decltype(f)>::value == true);
+        static_assert(std::is_nothrow_default_constructible<promise_void<>>::value == true);
+        static_assert(noexcept(f.valid()) == true);
+        static_assert(std::is_nothrow_copy_constructible<std::shared_ptr<state_base>>::value == true);
+
     }
     // ok, ill-formed
     #if 0
@@ -419,7 +427,7 @@ static void test_threads_after_force_futex_and_slow_path()
 // no futex calls
 static void perf_test_threads_before()
 {
-    std::vector<before::state_base> bases {100000};
+    std::vector<before::state_base> bases {100'000};
     std::thread t{
         [&bases](){
             auto t0 = realtime_now();
@@ -428,7 +436,7 @@ static void perf_test_threads_before()
                 assert(base.ready());
             }
             auto t1 = realtime_now();
-            std::cout << "time before: " << (t1 - t0)/1000000u << "ms" << std::endl;
+            std::cout << "time before: " << (t1 - t0)/1'000'000u << "ms" << std::endl;
         }
     };
 
@@ -442,7 +450,7 @@ static void perf_test_threads_before()
 // no futex calls
 static void perf_test_threads_after()
 {
-    std::vector<after::state_base> bases {100000};
+    std::vector<after::state_base> bases {100'000};
     std::thread t{
         [&bases](){
             auto t0 = realtime_now();
@@ -451,7 +459,7 @@ static void perf_test_threads_after()
                 assert(base.ready());
             }
             auto t1 = realtime_now();
-            std::cout << "time after: " << (t1 - t0)/1000000u << "ms" << std::endl;
+            std::cout << "time after: " << (t1 - t0)/1'000'000u << "ms" << std::endl;
         }
     };
 
@@ -459,6 +467,97 @@ static void perf_test_threads_after()
         base._M_set_result();
     }
     t.join();
+}
+
+#include <mutex>
+#include <setjmp.h>
+
+/*
+ * ref: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84323
+ * https://sourceware.org/bugzilla/show_bug.cgi?id=18435
+ * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84323
+ *
+ * std::call_once - similar to std::async for non-returnable callable.
+   Uses std::once_flag (__gthread_once_t).
+
+ * has _GLIBCXX_HAVE_TLS (if not manually sets unique_lock), then __gthread_once call,
+   so not fully lock free (TODO: check libc++ implementation)
+
+ *  __gthread_once - "the behavior of pthread_once() is undefined if once_control
+                has automatic storage duration". Interesting does it mean  std::once_flag
+                itself can't be automatic ?
+
+ * because of problem that "pthread_once hangs when init routine throws an exception" bug
+   on ARM and PowerPC pthread_once shoudln't be used for std::call_once internal impl.
+   Now pthread_once NOT marked as __THROW.
+
+ * currently std::call_once is buggy on gcc (even on x64 it hangs, but don't know why excatly)
+
+ * call_once_issues_ok mitigate problem but is hacky and UBSan complains (so temporary disabled)
+
+ * in stdlib.h only qsort and bsearch are __THROW as callbacks may throw exception
+ * define __THROW	__attribute__ ((__nothrow__ __LEAF))
+   __THROWNL = may throw && not leaf
+
+ * to stop thread gracefully (via cancellection point) pthread_cancel(), not portable in  C++ :(
+*/
+namespace call_once_issues_nok {
+
+auto call_count = 0;
+
+void func_() {
+    printf("Inside func_ call_count %d\n", call_count);
+    if (++call_count < 2)
+        throw 0;
+}
+
+std::once_flag flag_;
+
+int basic_test() {
+    printf("\n%s\n", __PRETTY_FUNCTION__);
+    printf("Before calling call_once flag_: %d\n", *(int*)&flag_);
+    try {
+        std::call_once(flag_, func_);
+    } catch(...) {
+        printf("Inside catch all excepton flag_: %d\n", *(int*)&flag_);
+    }
+    printf("before the 2nd call to call_once flag_: %d\n", *(int*)&flag_);
+    std::call_once(flag_, func_);
+}
+
+}
+
+namespace call_once_issues_ok {
+
+pthread_once_t flag_ = PTHREAD_ONCE_INIT;
+auto call_count = 0;
+jmp_buf catch_;
+
+void func_() {
+    printf("Inside func_ call_count %d\n", call_count);
+    if (++call_count < 2)
+        longjmp(catch_, 1);
+}
+
+int basic_test() {
+    printf("%s\n", __PRETTY_FUNCTION__);
+    printf("Before calling call_once flag_: %d\n", *(int*)&flag_);
+    auto signo = setjmp(catch_);
+    if (!signo)
+        pthread_once(&flag_, func_);
+    else
+        printf("Inside catch all excepton flag_: %d\n", *(int*)&flag_);
+    printf("before the 2nd call to call_once flag_: %d\n", *(int*)&flag_);
+    pthread_once(&flag_, func_);
+}
+
+void no_32bits_limit_for_pthread_once_t_from_JW() {
+    while (true) {
+        std::once_flag f;
+        std::call_once(f, [](){});
+    }
+}
+
 }
 
 int main()
@@ -470,8 +569,10 @@ int main()
 
     test_space_savings();
     test_threads_after_force_futex_and_slow_path();
-    // for 100000000
+    // for 100'000'000
     perf_test_threads_before();
     perf_test_threads_after();
+    call_once_issues_ok::basic_test();
+    call_once_issues_nok::basic_test();
     return 0;
 }
