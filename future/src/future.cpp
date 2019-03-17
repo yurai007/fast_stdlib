@@ -477,11 +477,12 @@ static void perf_test_threads_after()
  * https://sourceware.org/bugzilla/show_bug.cgi?id=18435
  * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84323
  *
- * std::call_once - similar to std::async for non-returnable callable.
+ * std::call_once - similar to std::async for non-returnable callable, but no extra thread is created.
    Uses std::once_flag (__gthread_once_t).
 
  * has _GLIBCXX_HAVE_TLS (if not manually sets unique_lock), then __gthread_once call,
-   so not fully lock free (TODO: check libc++ implementation)
+   so not fully lock free.
+   In libc++ implementation call_once use atomics without pthread_once
 
  *  __gthread_once - "the behavior of pthread_once() is undefined if once_control
                 has automatic storage duration". Interesting does it mean  std::once_flag
@@ -493,14 +494,80 @@ static void perf_test_threads_after()
 
  * currently std::call_once is buggy on gcc (even on x64 it hangs, but don't know why excatly)
 
- * call_once_issues_ok mitigate problem but is hacky and UBSan complains (so temporary disabled)
+ * call_once_issues_ok mitigate problem
 
  * in stdlib.h only qsort and bsearch are __THROW as callbacks may throw exception
  * define __THROW	__attribute__ ((__nothrow__ __LEAF))
    __THROWNL = may throw && not leaf
 
  * to stop thread gracefully (via cancellection point) pthread_cancel(), not portable in  C++ :(
-*/
+*/ 
+
+namespace call_once_basics {
+
+static void test() {
+    {
+        static auto shared = 0u;
+        auto init = []{
+            ++shared;
+        };
+        auto fun = [&init](){
+            static std::once_flag f;
+            std::call_once(f, init);
+        };
+        std::thread t0(fun);
+        std::thread t1(fun);
+        std::thread t2(fun);
+        t0.join();
+        t1.join();
+        t2.join();
+        assert(shared == 1u);
+    }
+    {
+        static_assert(std::is_same_v<std::decay<const volatile int&>::type, int> == true);
+
+        std::once_flag flag_;
+        const volatile int value = 321;
+        const volatile int &arg = value;
+        // ok, no DECAY_COPY for arg
+        std::call_once(flag_, [](const volatile int&){
+
+        }, arg);
+    }
+
+    // check deadlock avoidance
+    {
+        static auto init41_called = 0, init42_called = 0;
+
+        using ms = std::chrono::milliseconds;
+        auto init41 = []{
+            std::this_thread::sleep_for(ms(250));
+            ++init41_called;
+        };
+
+        auto init42 = []{
+            std::this_thread::sleep_for(ms(250));
+            ++init42_called;
+        };
+
+        static std::once_flag flg41, flg42;
+
+        std::thread t0([&]{
+            std::call_once(flg41, init41);
+            std::call_once(flg42, init42);
+        });
+        std::thread t1([&]{
+            std::call_once(flg42, init42);
+            std::call_once(flg41, init41);
+        });
+        t0.join();
+        t1.join();
+        assert(init41_called == 1);
+        assert(init42_called == 1);
+    }
+}
+}
+
 namespace call_once_issues_nok {
 
 auto call_count = 0;
@@ -513,7 +580,7 @@ void func_() {
 
 std::once_flag flag_;
 
-int basic_test() {
+void basic_test() {
     printf("\n%s\n", __PRETTY_FUNCTION__);
     printf("Before calling call_once flag_: %d\n", *(int*)&flag_);
     try {
@@ -539,7 +606,7 @@ void func_() {
         longjmp(catch_, 1);
 }
 
-int basic_test() {
+void basic_test() {
     printf("%s\n", __PRETTY_FUNCTION__);
     printf("Before calling call_once flag_: %d\n", *(int*)&flag_);
     auto signo = setjmp(catch_);
@@ -572,6 +639,7 @@ int main()
     // for 100'000'000
     perf_test_threads_before();
     perf_test_threads_after();
+    call_once_basics::test();
     call_once_issues_ok::basic_test();
     call_once_issues_nok::basic_test();
     return 0;

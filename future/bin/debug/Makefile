@@ -10,12 +10,12 @@ all: $(OBJS)
 	$(CXX) $(CXXFLAGS) $(OBJS) -o future $(LDFLAGS)
 
 clang: 
-	make CXX=clang++ CXXFLAGS='-std=c++2a -Weverything -Wno-c++98-compat -Wpedantic -g \
+	make CXX=clang++ CXXFLAGS='-std=c++2a -Weverything -Wno-c++98-compat -Wno-c99-extensions -Wno-c++98-compat-pedantic -Wpedantic -g -stdlib=libc++ \
 		-fsanitize=address -fsanitize=undefined' all
 
 gcc: 
-	make CXX=g++ CXXFLAGS='-Wall -W -Wextra -Wshadow -Wpedantic -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts' all
-#		-fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr' all
+	make CXX=g++ CXXFLAGS='-Wall -W -Wextra -Wshadow -Wpedantic -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts \
+		-fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr' all
 
 clean:
 	@- $(RM) future
