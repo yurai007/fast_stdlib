@@ -5,6 +5,7 @@
 #include <functional>
 #include <thread>
 #include <memory>
+#include <stdexcept>
 
 #define FWD(...) ::std::forward<decltype(__VA_ARGS__)>(__VA_ARGS__)
 
@@ -51,7 +52,7 @@ public:
     async_state() = default;
     async_state(function && func) : _M_fn(func) {}
     void _M_complete_async() override {
-        std::call_once(flag, [this](){ this->_M_fn(); });
+        std::call_once(flag, [this]{ this->_M_fn(); });
     }
 private:
     function _M_fn;
@@ -61,8 +62,7 @@ private:
 enum class async_policy { deffered, async };
 
 template<
-        template<class T> class shared_ptr = std::shared_ptr
-        >
+        template<class T> class shared_ptr = std::shared_ptr>
 class future_void {
     shared_ptr<state_base> _M_state;
 public:
@@ -95,8 +95,7 @@ private:
 };
 
 template<
-        template<class T> class shared_ptr = std::shared_ptr
-        >
+        template<class T> class shared_ptr = std::shared_ptr>
 class promise_void {
     shared_ptr<state_base> _M_future;
 public:
@@ -109,9 +108,46 @@ public:
     }
 
     void set_value() {
-        _M_future->_M_set_result();
+        if (_M_future) {
+            _M_future->_M_set_result();
+        } else {
+            throw std::runtime_error("");
+        }
     }
 };
+
+future_void<> make_ready_future() {
+    return future_void([]{}, async_policy::deffered);
+}
+
+template <typename T>
+struct is_future : std::true_type {};
+
+//template <typename T>
+//struct is_future<future_void<>> : std::true_type {};
+
+#ifndef __clang__
+template <typename T>
+concept bool Future = is_future<T>::value;
+
+template<class FuturesContainer>
+requires requires (FuturesContainer c) {
+    std::begin(c);
+    std::end(c);
+    is_future<decltype(*std::begin(c))>::value;
+}
+// [[nodiscard]]
+inline auto when_all(FuturesContainer &&container) {
+    if (std::all_of(container.begin(), container.end(),
+                    [](auto &&f) {
+                        f.wait();
+                        return !f.valid(); })) {
+        return make_ready_future();
+    } else {
+        throw std::runtime_error("");
+    }
+}
+#endif
 
 template<typename Func>
 [[nodiscard]] inline auto async_void(Func&& f, async_policy policy = async_policy::deffered)
@@ -125,7 +161,7 @@ using func_ptr = Ret (*)();
 template<typename Ret>
 struct lightweight_stateless_function
 {
-    lightweight_stateless_function(func_ptr<Ret> func) : m_func(func) {}
+    explicit lightweight_stateless_function(func_ptr<Ret> func) : m_func(func) {}
 
     inline Ret operator()()
     {
@@ -239,7 +275,5 @@ concept bool CanApply = requires (Func f, T... args) {
 };
 #endif
 
-template <typename... U, typename... Args>
-future<U...> make_ready_future(Args &&... value);
 
 }

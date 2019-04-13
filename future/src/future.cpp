@@ -119,6 +119,21 @@ static void test_basics()
         assert(done);
     }
     #endif
+    //can't set value before getting it
+    {
+        promise_void<> p;
+        try {
+            p.set_value();
+            assert(false);
+        } catch (...) {
+        }
+    }
+    {
+        auto f = make_ready_future();
+        assert(f.valid());
+        f.wait();
+        assert(true);
+    }
 }
 
 static void test_async()
@@ -171,6 +186,25 @@ static void test_async()
         assert(f.valid());
         f.wait();
         assert(!f.valid());
+    }
+}
+
+static void test_when_all() {
+    {
+        std::vector<future_void<>> channels;
+        auto f = when_all(std::move(channels));
+        assert(f.valid());
+        f.wait();
+    }
+    {
+        std::vector<future_void<>> channels;
+#if 0
+        channels.emplace_back(make_ready_future());
+        channels.emplace_back(make_ready_future());
+#endif
+        auto f = when_all(std::move(channels));
+        assert(f.valid());
+        f.wait();
     }
 }
 
@@ -631,6 +665,7 @@ int main()
 {
     test_basics();
     test_async();
+    test_when_all();
     test_space_cost();
     test_inline_then_concept();
 
