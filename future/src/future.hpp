@@ -121,10 +121,10 @@ future_void<> make_ready_future() {
 }
 
 template <typename T>
-struct is_future : std::true_type {};
+struct is_future : std::false_type {};
 
-//template <typename T>
-//struct is_future<future_void<>> : std::true_type {};
+template <>
+struct is_future<future_void<>> : std::true_type {};
 
 #ifndef __clang__
 template <typename T>
