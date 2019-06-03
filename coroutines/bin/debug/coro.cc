@@ -5,7 +5,6 @@
 
 /*
 ref1: http://cpp.mimuw.edu.pl/files/await-yield-c++-coroutines.pdf
-advanced TODO: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1341r0.pdf
 
 * those naked coroutines can't be use out-of-the-box, some extra helpers are needed,
   another problem - co_await doesn't work with std::future, can work with boost::future but 'then' is needed :(
@@ -49,6 +48,8 @@ ref3: https://lewissbaker.github.io/2018/09/05/understanding-the-promise-type
     }
 
 * coroutine_handle - provides a way of controlling the execution and lifetime of the coroutine.
+  stdx::suspend_always - operation is lazily started
+  stdx::suspend_never - operation eagerly started
 
 * test2 - demonstration of efficiency, everything computed during compilation,
     generated:
@@ -69,6 +70,8 @@ struct stdx::coroutine_traits<std::future<R>, Args...> {
         void return_value(int v) {
             p.set_value(v);
         }
+        // cannot have simultanuelsy return_void with return_value
+        //void return_void() {}
         std::future<R> get_return_object() { return p.get_future(); }
         void unhandled_exception() { p.set_exception(std::current_exception()); }
     };
@@ -206,11 +209,33 @@ static auto test2() {
 }
 }
 
+#include <chrono>
+
 /*
  * Awaiter type implements the 3 methods that are called as part of a co_await expression: await_ready, await_suspend and await_resume
  */
 namespace co_await_basics {
 
+// co_await specialization for std::chrono::duration
+// Stateless Awaitable
+template <typename Rep, typename Period>
+auto operator co_await(std::chrono::duration<Rep, Period> d) {
+    struct [[nodiscard]] Awaitable {
+        std::chrono::system_clock::duration duration;
+
+        Awaitable(std::chrono::system_clock::duration d) : duration(d){}
+        bool await_ready() const { return duration.count() <= 0; }
+        void await_resume() {}
+        void await_suspend(stdx::coroutine_handle<> h){
+            // here we should attach async sleep and then h.resume(); in countinuation
+            // await_suspend should return immediately
+        }
+    };
+    return Awaitable{d};
+}
+
+// async_read_some which can work with co_await
+// Stateful Awaitable
 template <typename Socket, typename BufferSeq, typename Error>
 auto async_read_some(Socket& socket, const BufferSeq &buffer) {
     struct [[nodiscard]] Awaitable {
@@ -220,7 +245,7 @@ auto async_read_some(Socket& socket, const BufferSeq &buffer) {
         size_t n;
 
         bool await_ready() { return false; }
-        void await_suspend(std::experimental::coroutine_handle<> h) {
+        void await_suspend(stdx::coroutine_handle<> h) {
             s.async_read_some(b, [this, h](auto ec, auto n) mutable {
                 this->ec = ec;
                 this->n = n;
@@ -236,18 +261,131 @@ auto async_read_some(Socket& socket, const BufferSeq &buffer) {
     return Awaitable{socket, buffer};
 }
 
+using namespace std::chrono;
+
+static std::future<void> test() {
+    std::cout << "just about go to sleep...\n";
+    co_await 1s; //explicit then ??
+    std::cout << "resumed\n";
+    co_await 2s;
+    std::cout << "resumed\n";
+}
+}
+
+/*
+ * The Compromise Executors Proposal: A lazy simplification of P0443
+   ref: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1194r0.html
+ * scheduled for C++23
+
+Old way: fut = executor.bulk_twoway_execute(f, n, sf, rf);
+
+New way:
+   2 steps: task creation + task submission
+   - enable lazy futures (separated lazy submission, before that - creation of future = submission to executor)
+     because the code returning the future can rely on the fact that submit will be called later by the caller.
+   - set_done ~ cancelletion channel
+   - set_error - error channel
+   - set_value - value channel
+ */
+namespace compromise_executors_proposal {
+
+// property
+struct receiver_t {
+    static inline constexpr bool is_requirable = false;
+    static inline constexpr bool is_preferable = false;
+};
+
+#ifndef __clang__ // Xclang -fconcepts-ts doesn't work yet
+// ok, query(), set_done(), Receiver ~ std::promise ?
+template <class To>
+concept bool Receiver = requires (To& to) {
+        query(to, receiver_t{});
+        set_done(to);
+};
+
+template <class Error = std::exception_ptr, class... Args>
+struct sender_desc {
+    using error_type = Error;
+
+    template <template <class...> class List>
+    using value_types = List<Args...>;
+};
+
+// property
+struct sender_t {
+    static inline constexpr bool is_requirable = false;
+    static inline constexpr bool is_preferable = false;
+};
+
+// Exposition only:
+template <class From>
+concept bool _Sender = requires (From& from) {
+        query(from, sender_t{});
+};
+
+// ok, query() and get_executor()
+template <class From>
+concept bool Sender = _Sender<From> && requires (From& from) {
+        get_executor(from) -> _Sender;
+};
+
+// ok, get_executor(), query(), set_done(), submit(), but why it's Receiver as well?
+template <class From, class To>
+concept bool SenderTo =
+        Sender<From> &&
+        Receiver<To> &&
+        requires (From& from, To&& to) {
+        submit(from, (To&&) to);
+};
+
+struct executor {
+    template<class F>
+    void execute(F&& func);
+
+    template<class F, class __Sender>
+    __Sender make_value_task(sender_t &&, F&& func) {
+        static_assert(SenderTo<__Sender, __Sender>);
+        return __Sender{};
+    }
+
+    template<class __Sender, class F, class RF, class PF>
+    __Sender make_bulk_value_task(sender_t &&, F&& func, size_t n, RF &&rf, PF &&pf) {
+        static_assert(SenderTo<__Sender, __Sender>);
+        return __Sender{};
+    }
+};
+
+struct my_sender {
+    template <class To>
+    void query(To, receiver_t);
+
+    template <class To>
+    void set_done(To to);
+
+    template <class from>
+    my_sender get_executor(from);
+
+    template <class From, class To>
+    void submit(From from, To&& to);
+
+    template <class To>
+    void submit(To&& to);
+};
+
 static auto test() {
+    auto sf = 321, rf = 42;
+    using futPromise = int;
+    executor{}.make_bulk_value_task<my_sender>(sender_t{}, [](){}, 123, sf, rf).submit(futPromise{});
+}
+#endif
 
 }
-
-}
-
 
 int main() {
-
     co_return_basics::test();
     co_yield_basics::test();
     assert(co_yield_basics::test2() == 1190);
-    co_await_basics::test();
+    //compromise_executors_proposal::test();
+    co_await_basics::test().get();
     return 0;
 }
