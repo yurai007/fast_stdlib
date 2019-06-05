@@ -1,4 +1,5 @@
 ﻿#include <experimental/coroutine>
+#include <experimental/thread_pool>
 #include <numeric>
 #include <future>
 #include <iostream>
@@ -26,7 +27,8 @@ ref3: https://lewissbaker.github.io/2018/09/05/understanding-the-promise-type
   that allows it to suspend execution at particular points within the function and then later resume execution
 
 * Promise concept:
-  coroutine’s promise object =  “coroutine state controller” != std::promise
+  - coroutine’s promise object =  “coroutine state controller” != std::promise
+  - manipulated from inside the coroutine
 
   coroutine function with <body-statements> generated to:
 
@@ -50,19 +52,37 @@ ref3: https://lewissbaker.github.io/2018/09/05/understanding-the-promise-type
 * coroutine_handle - provides a way of controlling the execution and lifetime of the coroutine.
   stdx::suspend_always - operation is lazily started
   stdx::suspend_never - operation eagerly started
+  It's manipulated from outside the coroutine. This is a non-owning handle used to resume execution of the coroutine or to destroy the coroutine frame.
+
+* coroutine state - internal, heap-allocated (unless the allocation is optimized out), object that contains
+    - the promise object
+    - the parameters (all copied by value)
+    - some representation of the current suspension point, so that resume knows where to continue and destroy knows what local variables were in scope
+    - local variables and temporaries whose lifetime spans the current suspension point
+
+* heap allocation maybe optimized out (e.g if the size of coroutine frame is known at the call site) and then coroutine state is embedded in the caller's stack frame
 
 * test2 - demonstration of efficiency, everything computed during compilation,
     generated:
         mov     eax, 1190
         ret
+* await_transform - for cancellation
+
+* ref2: https://llvm.org/devmtg/2016-11/Slides/Nishanov-LLVMCoroutines.pdf
 */
 
 namespace stdx = std::experimental;
+namespace execution = stdx::execution;
+using stdx::static_thread_pool;
+template<class T>
+using future = execution::executor_future_t<static_thread_pool::executor_type, T>;
+template<class T>
+using promise = stdx::executors_v1::promise<T>;
 
 // needed for co_return, must be in global namespace
 template <typename R, typename... Args>
 struct stdx::coroutine_traits<std::future<R>, Args...> {
-    //
+    // promise_type - part of coroutine state
     struct promise_type {
         std::promise<R> p;
         suspend_never initial_suspend() { return {}; }
@@ -141,6 +161,7 @@ template <typename T> struct generator {
         return {p, p.done()};
     }
     iterator end() { return {p, true}; }
+    // not Copyable but Movable
     generator(generator const&) = delete;
     generator(generator &&rhs) : p(rhs.p) { rhs.p = nullptr; }
 
@@ -216,19 +237,26 @@ static auto test2() {
  */
 namespace co_await_basics {
 
+static_thread_pool _pool{1};
+
 // co_await specialization for std::chrono::duration
 // Stateless Awaitable
 template <typename Rep, typename Period>
 auto operator co_await(std::chrono::duration<Rep, Period> d) {
     struct [[nodiscard]] Awaitable {
-        std::chrono::system_clock::duration duration;
+        std::chrono::system_clock::duration _duration;
 
-        Awaitable(std::chrono::system_clock::duration d) : duration(d){}
-        bool await_ready() const { return duration.count() <= 0; }
+        Awaitable(std::chrono::system_clock::duration d) : _duration(d){}
+        bool await_ready() const { return _duration.count() <= 0; }
         void await_resume() {}
         void await_suspend(stdx::coroutine_handle<> h){
             // here we should attach async sleep and then h.resume(); in countinuation
             // await_suspend should return immediately
+            // ofc linux timer would be better
+           execution::require(_pool.executor(), execution::single, execution::oneway).execute([this, h]() mutable {
+                std::this_thread::sleep_for(_duration);
+                h.resume();
+            });
         }
     };
     return Awaitable{d};
@@ -269,6 +297,7 @@ static std::future<void> test() {
     std::cout << "resumed\n";
     co_await 2s;
     std::cout << "resumed\n";
+    _pool.wait();
 }
 }
 
