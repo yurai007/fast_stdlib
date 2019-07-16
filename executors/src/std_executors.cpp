@@ -2,6 +2,9 @@
 #include <type_traits>
 #include <cassert>
 #include <stdexcept>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <memory>
 
 namespace stdx = std::experimental;
 namespace execution = stdx::execution;
@@ -88,8 +91,8 @@ static auto test() {
     static_thread_pool pool{1};
     auto executor = pool.executor();
     // generic execute() - static_thread_pool::execute(Blocking, Continuation, const ProtoAllocator& alloc, Function f)
-    // only notify worker thred in pool by cv.notify()
-    executor.execute([]{
+    // only notify worker thread in pool by cv.notify()
+    executor.execute([]() noexcept {
         std::cout << "done1\n";
     });
     // require_fn::operator() forwards execution::always_blocking to:
@@ -101,14 +104,46 @@ static auto test() {
     // with always_blocking another execution path
     // specialized execute() - execute(execution::always_blocking_t, Continuation, const ProtoAllocator& alloc, Function f)
     // extra promise + future wrapping
-    executor2.execute([]{
+    executor2.execute([]() noexcept {
         std::cout << "done2\n";
     });
     pool.wait();
 }
 
+// internals ?
 static auto test_continuation_property() {
-    throw std::runtime_error("TO DO");
+    static_thread_pool pool{32};
+    auto executor = execution::require(pool.executor(), execution::continuation);
+    std::cout << "init on " << syscall(SYS_gettid) << "\n";
+    executor.execute([]() noexcept {
+        std::cout << "step 1 on " << syscall(SYS_gettid) << "\n";
+    });
+    executor.execute([&executor, internal = execution::require(executor, execution::continuation)] {
+        std::cout << "step 2 on " << syscall(SYS_gettid) << "\n";
+        executor.execute([]() noexcept {
+            std::cout << "step 3 on " << syscall(SYS_gettid) << "\n";
+        });
+    });
+    executor.execute([]() noexcept {
+        std::cout << "step 4 on " << syscall(SYS_gettid) << "\n";
+    });
+    pool.wait();
+}
+
+static auto test_outstanding_work() {
+    static_thread_pool pool{2};
+    auto work_ex = execution::prefer(pool.executor(), execution::outstanding_work);
+    auto possibly_blocking_ex = execution::prefer(work_ex, execution::possibly_blocking);
+    work_ex.execute([] {
+        std::cout << "async work on " << syscall(SYS_gettid) << "\n";
+    });
+    possibly_blocking_ex.execute(
+        [] {
+          std::cout << "possibly blocking on " << syscall(SYS_gettid) << "\n";
+        }
+      );
+    // blocks
+    pool.wait();
 }
 
 }
@@ -169,7 +204,57 @@ static auto test() {
     }
     pool.wait();
 }
+}
+/*
+ 1. static_thread_pool bug reproducer
+    yurai@archlinux debug]$ ./std-executors
+    /home/yurai/programs/executors-impl/include/experimental/bits/static_thread_pool.h:239:7:
+        runtime error: member access within address 0x603000000040 which does not point to an object of type
+            'std::experimental::executors_v1::static_thread_pool::func<(lambda at ../../src/std_executors.cpp:135:22), std::__1::allocator<void> >'
+ */
+namespace experimental_bugs {
 
+template<class T>
+struct allocator {
+    template<class Arg>
+    T *allocate(Arg &arg) {
+        return new T(arg);
+    }
+
+    void deallocate(T *ptr) {
+        delete ptr;
+    }
+};
+
+struct func_base {
+    virtual void destroy() = 0;
+    virtual ~func_base() = default;
+    std::unique_ptr<int> next_;
+};
+
+struct func : func_base {
+    explicit func(allocator<func> &a) : allocator_(a) {}
+
+    static func_base *create(allocator<func> &a) {
+        auto *ptr = a.allocate(a);
+        return ptr;
+    }
+    virtual void destroy()
+    {
+      func* p = this;
+      p->~func();
+      // it's unlegal/UB
+      allocator_.deallocate(p);
+    }
+    std::function<void(void)> function_;
+    allocator<func> allocator_;
+};
+
+static auto Ubsan_minimal_reproducer1() {
+    allocator<func> allocator;
+    auto *f = func::create(allocator);
+    f->destroy();
+}
 }
 
 int main() {
@@ -177,7 +262,9 @@ int main() {
 #ifndef __clang__
     properties::preliminaries_executors_concepts();
 #endif
-    properties::test();
     polymorphic_executors::test();
+    properties::test_continuation_property();
+    experimental_bugs::Ubsan_minimal_reproducer1();
+    properties::test_outstanding_work();
     return 0;
 }
