@@ -255,6 +255,32 @@ static auto Ubsan_minimal_reproducer1() {
     auto *f = func::create(allocator);
     f->destroy();
 }
+
+static auto Memcheck_reproducer() {
+    static_thread_pool pool(1);
+    auto f = execution::require(pool.executor(), execution::twoway).twoway_execute([]{
+        std::cout << "first" << std::endl;
+        return 42;
+    }).then(pool.executor(), [](auto f){
+        return f;
+    });
+    assert(f.get() == 42);
+    pool.wait();
+}
+
+static auto Helgrind_reproducer() {
+    static_thread_pool pool(1);
+    {
+        auto f = execution::require(pool.executor(), execution::twoway).twoway_execute([](){
+            return 42;
+        }).then([](auto maybe_value){
+            auto value = maybe_value.get();
+            return ++value;
+        });
+        assert(f.get() == 43);
+    }
+    pool.wait();
+}
 }
 
 #define FWD(...) ::std::forward<decltype(__VA_ARGS__)>(__VA_ARGS__)
@@ -412,15 +438,16 @@ static auto test() {
 }
 
 int main() {
-    properties::preliminaries_without_concepts();
-#ifndef __clang__
-    properties::preliminaries_executors_concepts();
-#endif
-    polymorphic_executors::test();
-    properties::test_continuation_property();
-    test_diagnostics_improvements_with_concepts::test();
-    more_tests::test();
-    experimental_bugs::Ubsan_minimal_reproducer1();
-    properties::test_outstanding_work();
+//    properties::preliminaries_without_concepts();
+//#ifndef __clang__
+//    properties::preliminaries_executors_concepts();
+//#endif
+//    polymorphic_executors::test();
+//    properties::test_continuation_property();
+//    test_diagnostics_improvements_with_concepts::test();
+//    more_tests::test();
+//    experimental_bugs::Ubsan_minimal_reproducer1();
+//    properties::test_outstanding_work();
+    experimental_bugs::Helgrind_reproducer();
     return 0;
 }
