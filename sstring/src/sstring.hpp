@@ -1,20 +1,17 @@
 ﻿#pragma once
 
 #include <cstring>
-#include <cassert>
-#include <cstdio>
-#include <ctime>
 #include <cstdlib>
-#include <array>
 #include <cstdint>
+#include <limits>
 
-namespace sstrings
-{
+namespace sstrings {
 
 template<const unsigned MaxSize>
-class sstring
-{
+class sstring {
 public:
+    static_assert(MaxSize < std::numeric_limits<uint32_t>::max(), "Only 32bit size is supported");
+    static_assert(MaxSize > 0u, "ISO C++ forbids zero-size array");
     using value_type = char;
     using reference = char&;
     using size_type = unsigned;
@@ -23,56 +20,54 @@ public:
     sstring& operator=(const sstring &) = delete;
     sstring& operator=(const sstring &&) = delete;
 
-    sstring()
-    {
-        constexpr auto internal {(MaxSize <= 7)};
-        init_content<internal>();
+    sstring() {
+        init_content();
     }
 
-    sstring(const char (&input_cstring)[MaxSize])
-    {
-        constexpr auto internal {(MaxSize <= 7)};
-        init_content<internal>(input_cstring);
+    sstring(const char (&input_cstring)[MaxSize]) {
+        init_content(input_cstring);
     }
 
-    // now it works only for internal strings
-    sstring& operator=(sstring &&another) noexcept
-    {
+    sstring& operator=(sstring &&another) noexcept {
+        static_assert(_is_internal());
         content = another.content;
-        another.init_content<true>();
+        another.init_content();
         return *this;
     }
 
-    // now it works only for internal strings
-    sstring(sstring&& another) noexcept
-    {
+    sstring(sstring&& another) noexcept {
+        static_assert(_is_internal());
         content = another.content;
-        another.init_content<true>();
+        another.init_content();
     }
 
-    char& operator[](unsigned pos) {
+    char& operator[](unsigned pos) noexcept {
+        static_assert(_is_internal());
         return content.internal.buffer[pos];
     }
 
-    bool is_internal() const
-    {
-        return (content.internal.size & 0x10);
+    bool is_internal() const noexcept {
+        return content.internal.size & 0x10;
     }
 
-    // that's flat comparision and works only for internal (small) strings
-    bool operator==(const sstring& another) const
-    {
+    bool operator==(const sstring& another) const noexcept {
+        static_assert(_is_internal());
         return content.internal_for_cmp.value ==
                 another.content.internal_for_cmp.value;
     }
 
-    ~sstring()
-    {
+    bool operator!=(const sstring& another) const noexcept {
+        return !(*this == another);
+    }
+
+    ~sstring() {
         if (!is_internal())
             delete[] content.external.buffer;
     }
 
 private:
+    // I use type punning through union here
+    // which is allowed on gcc and clang: https://stackoverflow.com/questions/54762186/unions-aliasing-and-type-punning-in-practice-what-works-and-what-does-not
     union contents
     {
         struct internal_type
@@ -95,54 +90,36 @@ private:
         } external;
         static_assert(sizeof(internal_type) == 8 && sizeof(external_type) == 8, "storage too big");
     } content;
-    static_assert(sizeof(content) == 8, "storage is fucked up");
 
-    template<bool T>
-    struct is_internal_helper { constexpr static bool value = T; };
-
-    template<bool T>
-    void init_content(const char (&input_cstring)[MaxSize])
-    {
-        init_content(input_cstring, is_internal_helper<T>());
+    constexpr static bool _is_internal() {
+        return MaxSize <= 7u;
     }
 
-    template<bool T>
-    void init_content()
-    {
-        init_content(is_internal_helper<T>());
+    void init_content(const char (&input_cstring)[MaxSize]) {
+        if constexpr(_is_internal()) {
+            content.internal_for_cmp.value = 0u;
+            std::memcpy(content.internal.buffer, input_cstring, MaxSize);
+            content.internal.size = (MaxSize & 0xf) | 0x10;
+        } else {
+            constexpr auto extra_space = sizeof(unsigned);
+            content.external.buffer = new char[MaxSize + extra_space];
+            std::memcpy(content.external.buffer + extra_space, input_cstring, MaxSize);
+
+            auto size = MaxSize;
+            content.external.buffer[0] = *reinterpret_cast<char*>(&size);
+        }
     }
 
-    void init_content(is_internal_helper<true>)
-    {
-        static_assert(MaxSize <= 7, "input string is too big");
-        content.internal.size = 0x10;
-    }
-
-    void init_content(is_internal_helper<false>)
-    {
-        static_assert(MaxSize > 7, "input string is too small");
-
-        unsigned size {MaxSize};
-        content.external.buffer = new char[MaxSize + 4];
-        content.external.buffer[0] = *reinterpret_cast<char*>(&size);
-    }
-
-    void init_content(const char (&input_cstring)[MaxSize], is_internal_helper<true>)
-    {
-        static_assert(MaxSize <= 7, "input string is too big");
-        std::memcpy(content.internal.buffer, input_cstring, MaxSize);
-        content.internal.size = (MaxSize & 0xf) | 0x10;
-    }
-
-    void init_content(const char (&input_cstring)[MaxSize], is_internal_helper<false>)
-    {
-        static_assert(MaxSize > 7, "input string is too small");
-
-        content.external.buffer = new char[MaxSize + 4];
-        std::memcpy(content.external.buffer + 4, input_cstring, MaxSize);
-
-        unsigned size {MaxSize};
-        content.external.buffer[0] = *reinterpret_cast<char*>(&size);
+    void init_content() {
+        if constexpr(_is_internal()) {
+            content.internal_for_cmp.value = 0u;
+            content.internal.size = 0x10;
+        } else {
+            constexpr auto extra_space = sizeof(unsigned);
+            auto size = MaxSize;
+            content.external.buffer = new char[MaxSize + extra_space];
+            content.external.buffer[0] = *reinterpret_cast<char*>(&size);
+        }
     }
 };
 

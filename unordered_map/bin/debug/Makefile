@@ -17,6 +17,11 @@ gcc:
 	make CXX=g++ CXXFLAGS='-Wall -W -Wextra -Wshadow -Wpedantic -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts \
 		-fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr' all
 
+
+sstring: ../../src/sstring.cpp
+	g++ -Wall -W -Wextra -Wshadow -Wpedantic -Wformat-security -Walloca -Wduplicated-branches -g -std=c++2a -fconcepts \
+		-fstack-protector -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr ../../src/sstring.cpp -o sstring
+
 clean:
 	@- $(RM) main
 	@- $(RM) $(OBJS)
