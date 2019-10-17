@@ -15,10 +15,11 @@ public:
     using value_type = char;
     using reference = char&;
     using size_type = unsigned;
+    using iterator = char*;
+    using const_iterator = const char*;
 
     sstring(const sstring &) = delete;
     sstring& operator=(const sstring &) = delete;
-    sstring& operator=(const sstring &&) = delete;
 
     sstring() {
         init_content();
@@ -29,40 +30,71 @@ public:
     }
 
     sstring& operator=(sstring &&another) noexcept {
-        static_assert(_is_internal());
-        content = another.content;
-        another.init_content();
+        if constexpr(_is_internal()) {
+            content = another.content;
+            another.init_content();
+        } else {
+            delete[] content.external.buffer;
+            content.external.buffer = another.content.external.buffer;
+            another.content.external.buffer = nullptr;
+        }
         return *this;
     }
 
     sstring(sstring&& another) noexcept {
-        static_assert(_is_internal());
-        content = another.content;
-        another.init_content();
+        if constexpr(_is_internal()) {
+            content = another.content;
+            another.init_content();
+        } else {
+            content.external.buffer = another.content.external.buffer;
+            another.content.external.buffer = nullptr;
+        }
     }
 
     char& operator[](unsigned pos) noexcept {
-        static_assert(_is_internal());
-        return content.internal.buffer[pos];
+        return data()[pos];
+    }
+
+    const char& operator[](unsigned pos) const noexcept {
+        return data()[pos];
     }
 
     bool is_internal() const noexcept {
         return content.internal.size & 0x10;
     }
 
-    bool operator==(const sstring& another) const noexcept {
-        static_assert(_is_internal());
-        return content.internal_for_cmp.value ==
-                another.content.internal_for_cmp.value;
+    template<const unsigned MaxSizeAnother>
+    bool operator==(const sstring<MaxSizeAnother>& another) const noexcept {
+        if constexpr(_is_internal()) {
+            return content.internal_for_cmp.value ==
+                    another.content.internal_for_cmp.value;
+        } else {
+            return (_size() == another._size()) && (std::memcmp(content.external.buffer + extra_space,
+                                                                another.content.external.buffer + extra_space, _size()) == 0);
+        }
     }
 
-    bool operator!=(const sstring& another) const noexcept {
+    template<const unsigned MaxSizeAnother>
+    bool operator!=(const sstring<MaxSizeAnother>& another) const noexcept {
         return !(*this == another);
     }
 
     ~sstring() {
         if (!is_internal())
             delete[] content.external.buffer;
+    }
+
+    iterator begin() noexcept {
+        return data();
+    }
+    iterator end() noexcept {
+        return data() +  MaxSize - 1u;
+    }
+    const_iterator cbegin() const noexcept {
+        return data();
+    }
+    const_iterator cend() const noexcept {
+        return data() +  MaxSize - 1u;
     }
 
 private:
@@ -91,8 +123,33 @@ private:
         static_assert(sizeof(internal_type) == 8 && sizeof(external_type) == 8, "storage too big");
     } content;
 
+    template<const unsigned>
+    friend class sstring;
+
+    constexpr static auto extra_space = sizeof(unsigned);
+
     constexpr static bool _is_internal() {
         return MaxSize <= 7u;
+    }
+
+    constexpr static unsigned _size() {
+        return MaxSize;
+    }
+
+    char* data() noexcept {
+        if constexpr(_is_internal()) {
+            return content.internal.buffer;
+        } else {
+            return &content.external.buffer[extra_space];
+        }
+    }
+
+    const char* data() const noexcept {
+        if constexpr(_is_internal()) {
+            return content.internal.buffer;
+        } else {
+            return &content.external.buffer[extra_space];
+        }
     }
 
     void init_content(const char (&input_cstring)[MaxSize]) {
@@ -101,7 +158,6 @@ private:
             std::memcpy(content.internal.buffer, input_cstring, MaxSize);
             content.internal.size = (MaxSize & 0xf) | 0x10;
         } else {
-            constexpr auto extra_space = sizeof(unsigned);
             content.external.buffer = new char[MaxSize + extra_space];
             std::memcpy(content.external.buffer + extra_space, input_cstring, MaxSize);
 
@@ -115,7 +171,6 @@ private:
             content.internal_for_cmp.value = 0u;
             content.internal.size = 0x10;
         } else {
-            constexpr auto extra_space = sizeof(unsigned);
             auto size = MaxSize;
             content.external.buffer = new char[MaxSize + extra_space];
             content.external.buffer[0] = *reinterpret_cast<char*>(&size);
