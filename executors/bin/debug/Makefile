@@ -1,7 +1,7 @@
 ﻿clang: CC := clang++
-clang: CXXFLAGS = -Wall -g -std=c++2a -Wno-c99-extensions -Wno-c++98-compat-pedantic -stdlib=libc++ -I/home/yurai/programs/executors-impl/include
+clang: CXXFLAGS = -Wall -g -std=c++2a -Wno-c99-extensions -Wno-c++98-compat-pedantic -Wno-c++11-narrowing -stdlib=libc++ -fcoroutines-ts -I/home/yurai/programs/executors-impl/include
 clang: LDFLAGS += -lpthread
-clang: CXXFLAGS += -fsanitize=address -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr
+#clang: CXXFLAGS += -fsanitize-recover=address -fsanitize=undefined -fsanitize-address-use-after-scope -fsanitize=signed-integer-overflow -fsanitize=vptr
 clang: ../../src/executors.cpp ../../src/std_executors.cpp
 	$(CC) $(CXXFLAGS) ../../src/executors.cpp -o executors $(LDFLAGS)
 	$(CC) $(CXXFLAGS) ../../src/std_executors.cpp -o std-executors $(LDFLAGS)

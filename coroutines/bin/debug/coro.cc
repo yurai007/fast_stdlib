@@ -3,6 +3,11 @@
 #include <numeric>
 #include <future>
 #include <iostream>
+#include <tuple>
+#include <type_traits>
+#include <thread>
+#include <mutex>
+#include <cassert>
 
 /*
 ref1: http://cpp.mimuw.edu.pl/files/await-yield-c++-coroutines.pdf
@@ -10,9 +15,9 @@ ref1: http://cpp.mimuw.edu.pl/files/await-yield-c++-coroutines.pdf
 * those naked coroutines can't be use out-of-the-box, some extra helpers are needed,
   another problem - co_await doesn't work with std::future, can work with boost::future but 'then' is needed :(
 
-* co_return -
+* co_return - finalization point
 * co_yield - lazy generation, suspends coroutine and resume when caller needs extra value
-* co_await - suspends coroutine and resume when result is available, needs await_ready
+* co_await - suspension point, suspends coroutine and resume when result is available, needs await_ready
 
 future<int> can be both awaited on and returned from a coroutine.
 generator<int> can be returned from a coroutine, but cannot be awaited on!
@@ -99,10 +104,24 @@ struct stdx::coroutine_traits<std::future<R>, Args...> {
 
 namespace co_return_basics {
 
-// f - coroutine
+/* f - coroutine/suspending function
+
+  Flow in f():
+  1. create stdx::coroutine_traits<std::future<R>>::promise_type
+  2. get_return_object()
+  3. initial_suspend()
+  4. suspend_never::await_ready()
+  5. suspend_never::await_resume()
+  6. "Entered" !
+  7. co_return
+  8. return_value()
+  9. final_suspend()
+  10. suspend_never::await_ready()
+  11. suspend_never::await_resume()
+  12. result.get()
+*/
 static std::future<int> f() {
-    //1. create promise_type<int> = p
-    //2. call p.return_value() and then p.final_suspend()
+    std::cout << "Entered" << std::endl;
     co_return 42;
 }
 
@@ -410,11 +429,469 @@ static auto test() {
 
 }
 
+/* Ref: https://luncliff.github.io/coroutine/articles/designing-the-channel
+   TO DO: hmm, even without iostream, still:
+   ERROR SUMMARY: 4 errors from 4 contexts (suppressed: 68 from 38) from helgrind,
+          but maybe because of static_thread_pool, check it later only with channel.
+
+ channel = (writer_list(head, tail),
+              reader_list(head, tail),
+              mutex)
+ * write(int x):
+   - writer(channel, &x) -> channel() ->
+        ptr = &x;
+ * writer::await_ready()
+ * co_await ch.write(msg) ->
+        writer::await_suspend() -> remember coroutine_handle (frame) + writer_list::push()
+ * co_await (msg, end) = ch.read() ->
+        reader::await_ready() -> writer_list::pop(); + remember coroutine_handle (frame)
+        from popped writer
+ * reader::await_resume -> resume coroutine_handle (frame)
+
+ Notice that:
+ Our list is allocation free, we store there pointers to externally owned local values.
+
+ TO DO: check destructor scenario
+*/
+
+// A non-null address that leads access violation
+static inline void* poison() noexcept {
+    return reinterpret_cast<void*>(0xFADE'038C'BCFA'9E64);
+}
+
+template <typename T>
+class list {
+public:
+    list() noexcept = default;
+
+    bool is_empty() const noexcept {
+        return head == nullptr;
+    }
+    void push(T* node) noexcept {
+        if (tail) {
+            tail->next = node;
+            tail = node;
+        } else
+            head = tail = node;
+    }
+    T* pop() noexcept {
+        auto node = head;
+        if (head == tail)
+            head = tail = nullptr;
+        else
+            head = head->next;
+        return node;
+    }
+private:
+    T* head{};
+    T* tail{};
+};
+
+struct bypass_lock final {
+    constexpr bool try_lock() noexcept {
+        return true;
+    }
+    constexpr void lock() noexcept {}
+    constexpr void unlock() noexcept {}
+};
+
+template <typename T, typename M = std::mutex>
+class channel;
+template <typename T, typename M>
+class reader;
+template <typename T, typename M>
+class writer;
+
+template <typename T, typename M>
+class [[nodiscard]] reader final {
+public:
+    using value_type = T;
+    using pointer = T*;
+    using reference = T&;
+    using channel_type = channel<T, M>;
+
+private:
+    using reader_list = typename channel_type::reader_list;
+    using writer = typename channel_type::writer;
+    using writer_list = typename channel_type::writer_list;
+
+    friend channel_type;
+    friend writer;
+    friend reader_list;
+
+protected:
+    mutable pointer value_ptr;
+    mutable void* frame; // Resumeable Handle
+    union {
+        reader* next = nullptr; // Next reader in channel
+        channel_type* channel;     // Channel to push this reader
+    };
+
+private:
+    explicit reader(channel_type& ch) noexcept
+        : value_ptr{}, frame{}, channel{std::addressof(ch)} {
+    }
+    reader(const reader&) noexcept = delete;
+    reader& operator=(const reader&) noexcept = delete;
+
+public:
+    reader(reader&& rhs) noexcept {
+        std::swap(value_ptr, rhs.value_ptr);
+        std::swap(frame, rhs.frame);
+        std::swap(channel, rhs.channel);
+    }
+    reader& operator=(reader&& rhs) noexcept {
+        std::swap(value_ptr, rhs.value_ptr);
+        std::swap(frame, rhs.frame);
+        std::swap(channel, rhs.channel);
+        return *this;
+    }
+    ~reader() noexcept = default;
+
+public:
+    bool await_ready() const  {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        channel->mtx.lock();
+        if (channel->writer_list::is_empty()) {
+            return false;
+        }
+        auto w = channel->writer_list::pop();
+        // exchange address & resumeable_handle
+        std::swap(value_ptr, w->value_ptr);
+        std::swap(frame, w->frame);
+
+        channel->mtx.unlock();
+        return true;
+    }
+    void await_suspend(stdx::coroutine_handle<> coro) {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        // notice that next & chan are sharing memory
+        auto& ch = *(this->channel);
+        frame = coro.address(); // remember handle before push/unlock
+        next = nullptr;         // clear to prevent confusing
+
+        ch.reader_list::push(this);
+        ch.mtx.unlock();
+    }
+    std::tuple<value_type, bool> await_resume() {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        auto t = std::make_tuple(value_type{}, false);
+        // frame holds poision if the channel is going to be destroyed
+        if (frame == poison())
+            return t;
+
+        // Store first. we have to do this because the resume operation
+        // can destroy the writer coroutine
+        auto& value = std::get<0>(t);
+        value = std::move(*value_ptr);
+        if (auto coro = stdx::coroutine_handle<>::from_address(frame))
+            coro.resume();
+
+        std::get<1>(t) = true;
+        return t;
+    }
+};
+
+template <typename T, typename M>
+class [[nodiscard]] writer final {
+public:
+    using value_type = T;
+    using pointer = T*;
+    using reference = T&;
+    using channel_type = channel<T, M>;
+
+private:
+    using reader = typename channel_type::reader;
+    using reader_list = typename channel_type::reader_list;
+    using writer_list = typename channel_type::writer_list;
+
+    friend channel_type;
+    friend reader;
+    friend writer_list;
+
+private:
+    mutable pointer value_ptr;
+    mutable void* frame; // Resumeable Handle
+    union {
+        writer* next = nullptr; // Next writer in channel
+        channel_type* channel;     // Channel to push this writer
+    };
+
+private:
+    explicit writer(channel_type& ch, pointer pv) noexcept
+        : value_ptr{pv}, frame{}, channel{std::addressof(ch)} {
+    }
+    writer(const writer&) noexcept = delete;
+    writer& operator=(const writer&) noexcept = delete;
+
+public:
+    writer(writer&& rhs) noexcept {
+        std::swap(value_ptr, rhs.value_ptr);
+        std::swap(frame, rhs.frame);
+        std::swap(channel, rhs.channel);
+    }
+    writer& operator=(writer&& rhs) noexcept {
+        std::swap(value_ptr, rhs.value_ptr);
+        std::swap(frame, rhs.frame);
+        std::swap(channel, rhs.channel);
+        return *this;
+    }
+    ~writer() noexcept = default;
+
+public:
+    bool await_ready() const {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        channel->mtx.lock();
+        if (channel->reader_list::is_empty()) {
+            return false;
+        }
+        auto r = channel->reader_list::pop();
+        // exchange address & resumeable_handle
+        std::swap(value_ptr, r->value_ptr);
+        std::swap(frame, r->frame);
+
+        channel->mtx.unlock();
+        return true;
+    }
+    void await_suspend(stdx::coroutine_handle<> coro) {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        // notice that next & chan are sharing memory
+        auto& ch = *(this->channel);
+
+        frame = coro.address(); // remember handle before push/unlock
+        next = nullptr;         // clear to prevent confusing
+
+        ch.writer_list::push(this);
+        ch.mtx.unlock();
+    }
+    bool await_resume() {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        // frame holds poision if the channel is going to destroy
+        if (frame == poison()) {
+            return false;
+        }
+        if (auto coro = stdx::coroutine_handle<>::from_address(frame))
+            coro.resume();
+
+        return true;
+    }
+};
+
+template <typename T, typename M>
+class channel final : list<reader<T, M>>, list<writer<T, M>> {
+    static_assert(std::is_reference<T>::value == false,
+                  "reference type can't be channel's value_type.");
+
+public:
+    using value_type = T;
+    using pointer = value_type*;
+    using reference = value_type&;
+    using mutex_type = M;
+
+private:
+    using reader = reader<value_type, mutex_type>;
+    using reader_list = list<reader>;
+    using writer = writer<value_type, mutex_type>;
+    using writer_list = list<writer>;
+
+    friend reader;
+    friend writer;
+
+    mutex_type mtx;
+public:
+    channel(const channel&) noexcept = delete;
+    channel(channel&&) noexcept = delete;
+    channel& operator=(const channel&) noexcept = delete;
+    channel& operator=(channel&&) noexcept = delete;
+    channel() noexcept : reader_list{}, writer_list{}, mtx{} {}
+
+    ~channel() noexcept(false)
+    {
+        writer_list& writers = *this;
+        reader_list& readers = *this;
+        //
+        // If the channel is raced hardly, some coroutines can be
+        //  enqueued into list just after this destructor unlocks mutex.
+        //
+        // Unfortunately, this can't be detected at once since
+        //  we have 2 list (readers/writers) in the channel.
+        //
+        // Current implementation allows checking repeatedly to reduce the
+        //  probability of such interleaving.
+        // Increase the repeat count below if the situation occurs.
+        // But notice that it is NOT zero.
+        //
+        auto repeat = 1; // author experienced 5'000+ for hazard usage
+        while (repeat--) {
+            std::unique_lock lck{mtx};
+
+            while (!writers.is_empty()) {
+                auto w = writers.pop();
+                auto coro = stdx::coroutine_handle<>::from_address(w->frame);
+                w->frame = poison();
+
+                coro.resume();
+            }
+            while (!readers.is_empty()) {
+                auto r = readers.pop();
+                auto coro = stdx::coroutine_handle<>::from_address(r->frame);
+                r->frame = poison();
+
+                coro.resume();
+            }
+        }
+    }
+
+public:
+    auto write(reference ref) noexcept {
+        return writer{*this, std::addressof(ref)};
+    }
+    auto read() noexcept {
+        reader_list& readers = *this;
+        return reader{*this};
+    }
+};
+
+auto bye = -123;
+
+std::future<int> producer(channel<int>& ch) {
+    auto msg = 1;
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(1s);
+    co_await ch.write(msg);
+    co_return 0;
+}
+
+std::future<int> ok_consumer(channel<int>& ch) {
+    auto [msg, ok] = co_await ch.read();
+    std::cout << msg << std::endl;
+    co_return 0;
+}
+
+std::future<int> producer2(channel<int>& ch) {
+    auto msg = 1;
+    using namespace std::chrono_literals;
+    co_await ch.write(msg);
+    co_await ch.write(bye);
+    co_return 0;
+}
+
+std::future<int> ok_consumer2(channel<int>& ch) {
+    for (auto [msg, ok] = co_await ch.read(); ok && msg != bye;
+         std::tie(msg, ok) = co_await ch.read()) {
+            std::cout << msg << std::endl;
+    }
+    co_return 0;
+}
+
+channel<int, std::mutex> _channel;
+
+static void test_channel_with_suspending_reader() {
+    std::cout << __PRETTY_FUNCTION__ << std::endl;
+    std::thread p([]{
+        producer(_channel).get();
+    });
+
+    std::thread c([]{
+        ok_consumer(_channel).get();
+    });
+    p.join();
+    c.join();
+}
+
+static void test_channel_with_suspending_writer() {
+    std::cout << __PRETTY_FUNCTION__ << std::endl;
+    std::thread p([]{
+        producer2(_channel).get();
+    });
+
+    std::thread c([]{
+        ok_consumer2(_channel).get();
+    });
+    p.join();
+    c.join();
+}
+
+// #include <https://raw.githubusercontent.com/Quuxplusone/coro/master/include/coro/unique_generator.h>
+namespace dangling_reference_issue {
+
+/*
+ref: https://quuxplusone.github.io/blog/2019/07/10/ways-to-get-dangling-references-with-coroutines/
+It would be useful to see state machine generated from Clang AST:
+    https://www.andreasfertig.blog/2019/09/coroutines-in-c-insights.html
+
+    * suspend points by deafult may only communicate through shared state on one stack frame
+    * test_nok1 - only one stack frame is preserved - ch, s survive but the referenced temporary string not -
+    it lives on frame below, use-after-free/dangling reference
+
+    * test_nok2 - still wrong even with local variable ! Still use-after-free/dangling reference.
+
+    * test_nok3 - it's still UB.
+    Interesting how it behaves - from link with -O1 it return 255 on godbolt.
+
+    More on coroutines and issues:
+
+    0. Basic - https://stackoverflow.com/questions/43503656/what-are-coroutines-in-c20/44244451#44244451
+    1. Easy - http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0973r0.pdf
+    2. Hard - http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1745r0.pdf
+*/
+
+#if 0
+unique_generator<char> explode(const std::string& s) {
+    for (char ch : s) {
+        co_yield ch;
+    }
+}
+
+static auto test_ok() {
+    using namespace std::string_literals;
+    auto s = "Hello World"s;
+    for (char ch : explode(s)) {
+        std::cout << ch << '\n';
+    }
+}
+
+static auto test_nok1() {
+    for (char ch : explode("Hello World")) {
+        std::cout << ch << '\n';
+    }
+}
+
+unique_generator<char> explode2(const std::string& rs) {
+    std::string s = rs;
+    for (char ch : s) {
+        co_yield ch;
+    }
+}
+
+static auto test_nok2() {
+    for (char ch : explode2("Hello World")) {
+        std::cout << ch << '\n';
+    }
+}
+
+unique_generator<char> explode3(const std::string& s) {
+    return [s]() -> unique_generator<char> {
+        for (char ch : s) {
+            co_yield ch;
+        }
+    }();
+}
+
+static auto test_nok3() {
+    for (char ch : explode3("Hello World")) {
+        std::cout << ch << '\n';
+    }
+}
+#endif
+
+}
+
+
 int main() {
-    co_return_basics::test();
-    co_yield_basics::test();
-    assert(co_yield_basics::test2() == 1190);
-    //compromise_executors_proposal::test();
-    co_await_basics::test().get();
+    //co_await_basics::test().get();
+    test_channel_with_suspending_reader();
+    test_channel_with_suspending_writer();
+    //assert(co_yield_basics::test2() == 1190);
     return 0;
 }
