@@ -8,6 +8,7 @@
 #include <time.h>
 #include <cassert>
 #include <unistd.h>
+#include <iostream>
 
 class cooperative_scheduler final {
 public:

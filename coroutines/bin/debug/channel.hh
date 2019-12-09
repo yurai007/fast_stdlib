@@ -3,6 +3,7 @@
 #include <experimental/coroutine>
 #include <mutex>
 #include <iostream>
+#include <future>
 
 /* Ref: https://luncliff.github.io/coroutine/articles/designing-the-channel
    TO DO: hmm, even without iostream, still:
@@ -30,6 +31,23 @@
 */
 
 namespace stdx = std::experimental;
+
+template <typename R, typename... Args>
+struct stdx::coroutine_traits<std::future<R>, Args...> {
+    // promise_type - part of coroutine state
+    struct promise_type {
+        std::promise<R> p;
+        suspend_never initial_suspend() { return {}; }
+        suspend_never final_suspend() { return {}; }
+        void return_value(int v) {
+            p.set_value(v);
+        }
+        // cannot have simultanuelsy return_void with return_value
+        //void return_void() {}
+        std::future<R> get_return_object() { return p.get_future(); }
+        void unhandled_exception() { p.set_exception(std::current_exception()); }
+    };
+};
 
 // A non-null address that leads access violation
 static inline void* poison() noexcept {
