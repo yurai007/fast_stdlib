@@ -102,24 +102,6 @@ using future = execution::executor_future_t<static_thread_pool::executor_type, T
 template<class T>
 using promise = stdx::executors_v1::promise<T>;
 
-// needed for co_return, must be in global namespace
-template <typename R, typename... Args>
-struct stdx::coroutine_traits<std::future<R>, Args...> {
-    // promise_type - part of coroutine state
-    struct promise_type {
-        std::promise<R> p;
-        suspend_never initial_suspend() { return {}; }
-        suspend_never final_suspend() { return {}; }
-        void return_value(int v) {
-            p.set_value(v);
-        }
-        // cannot have simultanuelsy return_void with return_value
-        //void return_void() {}
-        std::future<R> get_return_object() { return p.get_future(); }
-        void unhandled_exception() { p.set_exception(std::current_exception()); }
-    };
-};
-
 namespace co_return_basics {
 
 /* f - coroutine/suspending function
@@ -328,13 +310,14 @@ auto async_read_some(Socket& socket, const BufferSeq &buffer) {
 
 using namespace std::chrono;
 
-static std::future<void> test() {
+static std::future<int> test() {
     std::cout << "just about go to sleep...\n";
     co_await 1s; //explicit then ??
     std::cout << "resumed\n";
     co_await 2s;
     std::cout << "resumed\n";
     _pool.wait();
+    co_return 0;
 }
 }
 
@@ -632,10 +615,10 @@ std::future<bool> donef = done.get_future();
 
 void fiber1() {
     auto task = []() -> std::future<int> {
-       std::cout << "thread1: start" << std::endl;
+       std::cout << "fiber1: start" << std::endl;
        auto [msg, ok] = co_await _channel.read();
        std::cout << msg << std::endl;
-       std::cout << "thread1: end" << std::endl;
+       std::cout << "fiber1: end" << std::endl;
        co_return 0;
     };
     task().get();
@@ -644,10 +627,10 @@ void fiber1() {
 
 void fiber2() {
    auto task = []() -> std::future<int> {
-       std::cout << "thread2: start" << std::endl;
+       std::cout << "fiber2: start" << std::endl;
        auto msg = 1;
        co_await _channel.write(msg);
-       std::cout << "thread2: end" << std::endl;
+       std::cout << "fiber2: end" << std::endl;
        co_return 0;
    };
    task().get();

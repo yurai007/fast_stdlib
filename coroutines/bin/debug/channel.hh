@@ -39,7 +39,7 @@ struct stdx::coroutine_traits<std::future<R>, Args...> {
         std::promise<R> p;
         suspend_never initial_suspend() { return {}; }
         suspend_never final_suspend() { return {}; }
-        void return_value(int v) {
+        void return_value(R v) {
             p.set_value(v);
         }
         // cannot have simultanuelsy return_void with return_value
@@ -338,10 +338,10 @@ public:
     }
 
 public:
-    auto write(reference ref) noexcept {
+    writer write(reference ref) noexcept {
         return writer{*this, std::addressof(ref)};
     }
-    auto read() noexcept {
+    reader read() noexcept {
         reader_list& readers = *this;
         return reader{*this};
     }
