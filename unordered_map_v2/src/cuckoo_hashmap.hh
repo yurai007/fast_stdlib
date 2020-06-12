@@ -17,18 +17,13 @@ class set {
 public:
     set(unsigned left, unsigned right)
         : n(0), left_capacity(left), right_capacity(right),
-          table_left(new T[space(left_capacity)]{infinity}),
-          table_right(new T[space(right_capacity)]{infinity}),
+          table_left(left_capacity, infinity),
+          table_right(right_capacity, infinity),
           loop_limit(log2(right_capacity)),
           rehash_counter(0)
     {
         // best speed when capacities are primes
         assert(right_capacity > left_capacity && right_capacity - left_capacity < 50);
-    }
-
-    ~set() {
-        delete[] table_right;
-        delete[] table_left;
     }
 
     set(const set&) = delete;
@@ -90,36 +85,34 @@ private:
         rehash_counter++;
         std::vector temporary_storage = {x};
         // use ranges
-        for (auto i = 0u; i < left_capacity; i++) {
-            auto &item = table_left[i];
+        for (auto &item : table_left) {
             if (item != infinity)
                 temporary_storage.push_back(item);
         }
-        for (auto i = 0u; i < right_capacity; i++) {
-            auto &item = table_right[i];
+        for (auto &item : table_right) {
             if (item != infinity)
                 temporary_storage.push_back(item);
         }
         left_capacity = prime(2*left_capacity);
         right_capacity = prime(left_capacity);
         loop_limit++;
-        // assuming we are in space
-        std::fill(table_left, table_left + left_capacity, infinity);
-        std::fill(table_right, table_right + right_capacity, infinity);
+        if (left_capacity > table_left.size()) {
+            table_left.resize(left_capacity);
+        }
+        if (right_capacity > table_right.size()) {
+            table_right.resize(right_capacity);
+        }
+        std::fill(table_left.begin(), table_left.begin() + left_capacity, infinity);
+        std::fill(table_right.begin(), table_right.begin() + right_capacity, infinity);
         for (auto &item : temporary_storage) {
             insert(item);
         }
     }
 
-    static unsigned space(unsigned capacity) noexcept {
-        return capacity + static_cast<unsigned>(capacity * static_cast<float>(extra_rehash_space_percent)/100.0);
-    }
-
     unsigned n;
     unsigned left_capacity, right_capacity;
-    T *table_left, *table_right;
+    std::vector<T> table_left, table_right;
     constexpr static auto infinity = std::numeric_limits<int>::min();
-    constexpr static auto extra_rehash_space_percent = 1610u;
     unsigned loop_limit;
 public:
     static unsigned prime(unsigned from) noexcept {
