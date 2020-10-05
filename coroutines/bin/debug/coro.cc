@@ -119,6 +119,46 @@ namespace co_return_basics {
   10. suspend_never::await_ready()
   11. suspend_never::await_resume()
   12. result.get()
+
+assembly (Clang -O0):
+
+f:
+
+call    ::promise_type::promise_type() [base object constructor]
+
+ call    ::promise_type::get_return_object()
+
+ call    ::promise_type::initial_suspend()
+
+ call    stdx::suspend_never::await_ready() const
+
+// slow path (SUSPEND)
+
+    call    stdx::coroutine_handle<::promise_type>::from_address(void*)
+
+    call    stdx::suspend_never::await_suspend(stdx::coroutine_handle<void>) const
+
+// fast path (RESUME)
+
+ call    stdx::suspend_never::await_resume() const
+
+ call    printf
+
+ call    ::promise_type::return_value(int)
+
+ call    __cxa_begin_catch
+
+    call    ::promise_type::unhandled_exception()
+
+ call    __cxa_end_catch
+
+ call    ::promise_type::final_suspend()
+
+ call    stdx::suspend_never::await_ready() const
+
+ call    stdx::coroutine_handle<::promise_type>::from_address(void*)
+
+ call    stdx::suspend_never::await_suspend(stdx::coroutine_handle<void>) const
 */
 static std::future<int> f() {
     std::cout << "Entered" << std::endl;

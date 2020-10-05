@@ -27,7 +27,66 @@
  Notice that:
  Our list is allocation free, we store there pointers to externally owned local values.
 
- TO DO: check destructor scenario
+ ---
+
+With following snippet (only one coroutine and NO scheduler):
+
+std::future<int> one_fiber() {
+    fmt::print("{}\n", __PRETTY_FUNCTION__);
+    // fiber 1
+    auto [rmsg, ok] = co_await _channel1.read();
+    fmt::print("Read done  {}\n", rmsg);
+    // Still fiber 1
+    auto msg = 1;
+    co_await _channel1.write(msg);
+    fmt::print("Write done\n");
+    co_return 0;
+}
+
+we have:
+
+std::future<int> channels::one_fiber()
+bool reader<T>::await_ready() const [with T = int]
+void reader<T>::await_suspend(std::__n4861::coroutine_handle<void>) [with T = int]
+channel<T>::~channel() [with T = int]
+channel<T>::~channel() [with T = int]
+std::tuple<T, bool> reader<T>::await_resume() [with T = int]
+Read done  0
+bool writer<T>::await_ready() const [with T = int]
+void writer<T>::await_suspend(std::__n4861::coroutine_handle<void>) [with T = int]
+
+It means that (seen under gdb):
+- with co_await read() after await_ready + await_suspend we just exit the one_fiber scope.
+  There is no "blocking" or whatever, suspending point is simply goto :) Guess only top-level SF is preserved.
+- if there was write() called by another coroutine/fiber we would resume via coroutine_handle::await_resume
+- ...but we have only one fiber so resuming will be done by ~channel in while (!readers.is_empty()).
+- so ~channel -> reader<T>::await_resume() -> Read done  0 and then we suspend again on write()
+- because we only have repeat = 1, we don't check again list of writers and that's why Write done
+  is missing!
+
+Problem:
+
+(gdb) catch throw -- to catch first throw instead last rethrowing current_exception
+
+1  __cxxabiv1::__cxa_throw                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   eh_throw.cc                78   0x7fe30f8da062
+2  std::__throw_system_error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 new_allocator.h            89   0x7fe30f8d09bc
+3  std::call_once<void (std::__future_base::_State_baseV2:: *)(std::function<std::unique_ptr<std::__future_base::_Result_base, std::__future_base::_Result_base::_Deleter> ()> *, bool *), std::__future_base::_State_baseV2 *, std::function<std::unique_ptr<std::__future_base::_Result_base, std::__future_base::_Result_base::_Deleter> ()> *, bool *>(std::once_flag&, void (std::__future_base::_State_baseV2:: *&&)(std::function<std::unique_ptr<std::__future_base::_Result_base, std::__future_base::_Result_base::_Deleter> ()> *, bool *), std::__future_base::_State_baseV2 *&&, std::function<std::unique_ptr<std::__future_base::_Result_base, std::__future_base::_Result_base::_Deleter> ()> *&&, bool *&&) mutex                      743  0x560c78e986f7
+4  std::__future_base::_State_baseV2::_M_set_result(std::function<std::unique_ptr<std::__future_base::_Result_base, std::__future_base::_Result_base::_Deleter> ()>, bool)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   future                     404  0x560c78e977b7
+5  std::promise<int>::set_value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              future                     1113 0x560c78e9b8df
+6  std::__n4861::coroutine_traits<std::future<int>, const channels::fiber1(int *)::<lambda()> *>::promise_type::return_value(int)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            channel.hh                 22   0x560c78e96736
+7  _ZZN8channels6fiber1EPiENKUlvE_clEv.actor(_ZZN8channels6fiber1EPiENKUlvE_clEv.frame *)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    scheduler_channel_tests.cc 133  0x560c78e95f98
+8  std::__n4861::coroutine_handle<void>::resume                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              coroutine                  126  0x560c78e97b17
+9  writer<int>::await_resume                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 channel.hh                 232  0x560c78e999cb
+10 _ZZN8channels6fiber2EPiENKUlvE_clEv.actor(_ZZN8channels6fiber2EPiENKUlvE_clEv.frame *)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    scheduler_channel_tests.cc 143  0x560c78e96424
+11 operator()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                scheduler_channel_tests.cc 140  0x560c78e96268
+12 channels::fiber2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          scheduler_channel_tests.cc 147  0x560c78e965a5
+?
+
+frame_ptr
+
+TO DO:
+- some stb co_await without channels
+- gdb coroutines helpers (convinience funcs/pretty printers)?
 */
 
 namespace stdx = std::experimental;
@@ -302,6 +361,7 @@ public:
 
     ~channel() noexcept(false)
     {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
         writer_list& writers = *this;
         reader_list& readers = *this;
         //
