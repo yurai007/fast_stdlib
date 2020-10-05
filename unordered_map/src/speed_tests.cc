@@ -291,93 +291,14 @@ Test only S:    rehashes = 2 searches = 449683   capacities = 1000081,1000099  a
 Sometimes for alpha = 0.19 Cuckoo has ~10 ns (2x slower then OA) but except that in general Cuckoo has stable latency <= 5ns for alpha <= 0.6
 with throughput arround 1GB/s.
 
-CHANGELOG:
-
-- change raw array to std::vector - no overhead, reallocation for free
-
  * interesting - there is no 'realloc' wrapper in  C++ (like new for malloc) and I can't realloc on
                 pointer from new (UB), so I need to use malloc+realloc instead :(
- * rehash needs realocation - do it like in std::vector via _ZNSt6vectorIiSaIiEE11_S_relocateEPiS2_S2_RS0_
+ * TO DO1: rehash needs realocation - do it like in std::vector via _ZNSt6vectorIiSaIiEE11_S_relocateEPiS2_S2_RS0_
           which is std::vector<int, std::allocator<int> >::_S_relocate(int*, int*, int*, std::allocator<int>&)
           but no idea where is the source :( Gdb for rescue :)
- * according paper http://www.cs.cmu.edu/~dongz/papers/cuckooswitch.pdf cache miss penalty is even ~100 ns.
-
-
-Raw from clang:
-
-vmovdqu ymm5,YMMWORD PTR [rbx+rsi*4]                                                                                                                                               │
-vmovdqu ymm6,YMMWORD PTR [rbx+rsi*4+0x20]                                                                                                                                          │
-vmovdqu ymm7,YMMWORD PTR [rbx+rsi*4+0x40]                                                                                                                                          │
-vmovdqu ymm8,YMMWORD PTR [rbx+rsi*4+0x60]                                                                                                                                          │
-vpcmpeqd ymm9,ymm9,ymm9                                                                                                                                                            │
-vpgatherdd ymm10,DWORD PTR [r13+ymm5*4+0x0],ymm9                                                                                                                                   │
-vpcmpeqd ymm5,ymm5,ymm5                                                                                                                                                            │
-vpgatherdd ymm9,DWORD PTR [r13+ymm6*4+0x0],ymm5                                                                                                                                    │
-vpcmpeqd ymm5,ymm5,ymm5                                                                                                                                                            │
-vpgatherdd ymm6,DWORD PTR [r13+ymm7*4+0x0],ymm5                                                                                                                                    │
-vpcmpeqd ymm5,ymm5,ymm5                                                                                                                                                            │
-vpgatherdd ymm7,DWORD PTR [r13+ymm8*4+0x0],ymm5                                                                                                                                    │
-vpcmpeqd ymm5,ymm10,ymm0                                                                                                                                                           │
-vpaddd ymm1,ymm1,ymm5                                                                                                                                                              │
-vpcmpeqd ymm5,ymm9,ymm0                                                                                                                                                            │
-vpaddd ymm4,ymm4,ymm5                                                                                                                                                              │
-vpcmpeqd ymm5,ymm6,ymm0                                                                                                                                                            │
-vpaddd ymm3,ymm3,ymm5                                                                                                                                                              │
-vpcmpeqd ymm5,ymm7,ymm0                                                                                                                                                            │
-vpaddd ymm2,ymm2,ymm5                                                                                                                                                              │
-vpsubd ymm1,ymm1,ymm0                                                                                                                                                              │
-vpsubd ymm4,ymm4,ymm0                                                                                                                                                              │
-vpsubd ymm3,ymm3,ymm0                                                                                                                                                              │
-vpsubd ymm2,ymm2,ymm0                                                                                                                                                              │
-add    rsi, 32
-cmp    rdx,rsi                                                                                                                                                                     │
-jne    0x555555555870 <raw_array_access::benchmark<int, unsigned int>(int, unsigned int)+720>
-
-BEFORE:
-
-Cuckoo: test only NOK lookups with almost no hits. WS = 2MB
-Test only S:    rehashes = 0 searches = 99820   capacities = 250013,250027  alpha = 0.19999  time = 3 ms     latency of search op = 15 ns   throughput = 266 MB/s   found = 4
-Used 1796838 instructions     401013 cache-references     260119 cache-misses
-Test only S:    rehashes = 1 searches = 199817   capacities = 500029,500041  alpha = 0.399979  time = 2 ms     latency of search op = 5 ns   throughput = 800 MB/s   found = 19
-Used 3596688 instructions     1037961 cache-references     118160 cache-misses
-Test only S:    rehashes = 1 searches = 300071   capacities = 500029,500041  alpha = 0.599969  time = 3 ms     latency of search op = 5 ns   throughput = 800 MB/s   found = 45
-Used 5401113 instructions     1552107 cache-references     204911 cache-misses
-Test only S:    rehashes = 2 searches = 449270   capacities = 1000081,1000099  alpha = 0.899953  time = 6 ms     latency of search op = 6.66667 ns   throughput = 600 MB/s   found = 124
-Used 8086313 instructions     2082384 cache-references     1064827 cache-misses
-Cuckoo: test only NOK lookups with almost no hits. WS = 10MB
-Test only S:    rehashes = 0 searches = 399365   capacities = 1250009,1250021  alpha = 0.159999  time = 6 ms     latency of search op = 7.5 ns   throughput = 533 MB/s   found = 96
-Used 7188111 instructions     1744009 cache-references     1086419 cache-misses
-Test only S:    rehashes = 0 searches = 899093   capacities = 1250009,1250021  alpha = 0.359997  time = 25 ms     latency of search op = 13.8889 ns   throughput = 288 MB/s   found = 473
-Used 16181546 instructions     4650919 cache-references     3130308 cache-misses
-Test only S:    rehashes = 1 searches = 1299539   capacities = 2500027,2500049  alpha = 0.519996  time = 22 ms     latency of search op = 8.46154 ns   throughput = 472 MB/s   found = 950
-Used 23387119 instructions     5185089 cache-references     4068792 cache-misses
-Test only S:    rehashes = 2 searches = 1899371   capacities = 5000077,5000081  alpha = 0.759995  time = 35 ms     latency of search op = 9.21053 ns   throughput = 434 MB/s   found = 1933
-Used 34178546 instructions     8162962 cache-references     6150930 cache-misses
-Cuckoo: Test only NOK lookups with almost no hits. WS = 100MB
-Test only S:    rehashes = 0 searches = 3998028   capacities = 12500177,12500197  alpha = 0.159998  time = 79 ms     latency of search op = 9.875 ns   throughput = 405 MB/s   found = 8560
-Used 71916727 instructions     20115630 cache-references     13372775 cache-misses
-Test only S:    rehashes = 2 searches = 9003898   capacities = 50000729,50000747  alpha = 0.359995  time = 228 ms     latency of search op = 12.6667 ns   throughput = 315 MB/s   found = 42799
-Used 161815617 instructions     60680058 cache-references     35178235 cache-misses
-Test only S:    rehashes = 2 searches = 12995373   capacities = 50000729,50000747  alpha = 0.519993  time = 290 ms     latency of search op = 11.1538 ns   throughput = 358 MB/s   found = 88951
-Used 233407951 instructions     83398263 cache-references     49026651 cache-misses
-Test only S:    rehashes = 4 searches = 19003161   capacities = 200002939,200002951  alpha = 0.759989  time = 845 ms     latency of search op = 22.2368 ns   throughput = 179 MB/s   found = 189929
-Used 340876961 instructions     184510027 cache-references     138879482 cache-misses
-
-TODO:
-
-1. With 2 slots it's a little bit better (less cache misses) but with 4 slots worse.
-What's the actual problem? Bigger WS, vectorization?
-
-2. It's quite strange that even raw version may produce for WS=100MB
-for searches = 18999740       42856108 cache-references  and   28321762 cache-misses so 3x cache refs and almost 1.5x
-cache misses per search.
-From memcpy/memset analysis - it's expected - we have 1 cache miss from search and ~0.5 cache miss from sequential scan.
-For Cuckoo even worse - even 6x cache misses per search! Well, that's quite unexpected :)
-
-3. memcpy on 2x 6GB WS (src + dst) generates just 10^8 cache misses so cache miss every 128B per array.
-
-4. Some compilation error with attribute(packed) on gcc. On clang well-formed.
-*/
+  TO DO2:
+       This one - http://www.cs.cmu.edu/~dongz/papers/cuckooswitch.pdf, according paper cache miss penalty is even ~100 ns.
+ */
 namespace cuckoo_hashmap_benchmarks {
 
 static void preliminaries() {
@@ -389,10 +310,7 @@ static void preliminaries() {
     std::cout << std::endl;
 }
 
-static void benchmark(unsigned capacity, unsigned operations_number) {
-    if constexpr (stats) {
-        perf_init();
-    }
+static void benchmark(auto capacity, auto operations_number) {
     constexpr auto uniwersum_size = 2'000'000'000u;
     auto left = static_cast<unsigned>(capacity), right = cuckoo::set<>::prime(left+1);
     cuckoo::set<> hashmap(left, right);
@@ -400,7 +318,7 @@ static void benchmark(unsigned capacity, unsigned operations_number) {
     std::vector<int> lookups_set;
     for (auto i = 0u; i < operations_number; i++) {
         auto operation = get_operation();
-        unsigned item = rand()%uniwersum_size;
+        auto item = rand()%uniwersum_size;
 
         if (operation == 'I') {
             hashmap.insert(item);
@@ -409,19 +327,9 @@ static void benchmark(unsigned capacity, unsigned operations_number) {
         }
     }
     auto t0 = realtime_now();
-    if constexpr (stats) {
-        perf_enable(fd1);
-        perf_enable(fd2);
-        perf_enable(fd3);
-    }
     auto found = 0u;
     for (auto n : lookups_set) {
         found += static_cast<unsigned>(hashmap.search(n));
-    }
-    if constexpr (stats) {
-        perf_disable(fd1);
-        perf_disable(fd2);
-        perf_disable(fd3);
     }
     auto t1 = realtime_now();
     auto time_ms = (t1 - t0)/1000000;
@@ -432,15 +340,6 @@ static void benchmark(unsigned capacity, unsigned operations_number) {
     std::cout << "Test only S:    rehashes = " << hashmap.rehash_counter << " searches = " << lookups_set.size()
            << "   capacities = " << nleft << "," << nright << "  alpha = " << alpha << "  time = " << time_ms << " ms     latency of search op = "
            << latency << " ns   throughput = " << throughput << " MB/s   found = " << found << std::endl;
-    if constexpr (stats) {
-        long long count1, count2, count3;
-        read(fd1, &count1, sizeof(count1));
-        read(fd2, &count2, sizeof(count2));
-        read(fd3, &count3, sizeof(count3));
-        std::cout << "Used " << count1 << " instructions     " << count2 << " cache-references     " <<
-                      count3 << " cache-misses" << std::endl;
-        perf_close();
-    }
 }
 }
 
@@ -462,8 +361,7 @@ int main() {
     raw_array_access::benchmark(25'000'109, 18'000'000u);
     raw_array_access::benchmark(25'000'109, 26'000'000u);
     raw_array_access::benchmark(25'000'109, 38'000'000u);
-    std::cout << std::endl;
-#if 0
+
     std::cout << "OA: test only NOK lookups with almost no hits. WS = 2MB\n";
     open_addressing_hashmap_benchmarks::benchmark(500'009, 200'000u);
     open_addressing_hashmap_benchmarks::benchmark(500'009, 400'000u);
@@ -481,8 +379,7 @@ int main() {
     open_addressing_hashmap_benchmarks::benchmark(25'000'109, 18'000'000u);
     open_addressing_hashmap_benchmarks::benchmark(25'000'109, 26'000'000u);
     open_addressing_hashmap_benchmarks::benchmark(25'000'109, 38'000'000u);
-    std::cout << std::endl;
-#endif
+
     std::cout << "Cuckoo: test only NOK lookups with almost no hits. WS = 2MB\n";
     cuckoo_hashmap_benchmarks::benchmark(250'013, 200'000u);
     cuckoo_hashmap_benchmarks::benchmark(250'013, 400'000u);

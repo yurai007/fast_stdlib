@@ -6,7 +6,7 @@ gcc: ../../src/speed_tests.cc
 	$(CXX) $(CXXFLAGS) ../../src/speed_tests.cc -o speed_tests $(LDFLAGS)
 
 clang: CXX := clang++
-clang: CXXFLAGS = -g -Wall -std=c++20 -fcoroutines-ts -Wno-c99-extensions -Wno-c++98-compat-pedantic #-stdlib=libc++
+clang: CXXFLAGS = -g -Wall -std=c++20 -fcoroutines-ts -Wno-c99-extensions -Wno-c++98-compat-pedantic -stdlib=libc++
 clang: CXXFLAGS += -Ofast -march=native
 clang: LDFLAGS += 
 clang: ../../src/speed_tests.cc 
