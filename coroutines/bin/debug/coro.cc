@@ -1,7 +1,6 @@
-﻿#include "channel.hh"
-#include "cooperative_scheduler.hh"
+﻿//#include "channel.hh"
+//#include "cooperative_scheduler.hh"
 #include <experimental/coroutine>
-#include <experimental/thread_pool>
 #include <numeric>
 #include <future>
 #include <iostream>
@@ -26,6 +25,17 @@
 #include <time.h>
 #include <syscall.h>
 #include <functional>
+
+#include <sys/types.h>
+#include <sys/time.h>
+#include <ucontext.h>
+#include <signal.h>
+#include <time.h>
+#include <utility>
+#include <cassert>
+#include <iostream>
+#include <vector>
+#include <future>
 
 /*
 ref1: http://cpp.mimuw.edu.pl/files/await-yield-c++-coroutines.pdf
@@ -94,13 +104,159 @@ ref3: https://lewissbaker.github.io/2018/09/05/understanding-the-promise-type
 * ref2: https://llvm.org/devmtg/2016-11/Slides/Nishanov-LLVMCoroutines.pdf
 */
 
+
+/*
+    -fcoroutines-ts
+    -stdlib=libc++
+    Basic intrastructure for co_await - timer simulating "Resumer" is needed because of lack of second fiber/thread/event source
+
+    TODO: Avi test_dummy_awaiter3
+*/
 namespace stdx = std::experimental;
-namespace execution = stdx::execution;
-using stdx::static_thread_pool;
+
+template <typename R, typename... Args>
+struct stdx::coroutine_traits<std::future<R>, Args...> {
+    // promise_type - part of coroutine state
+    struct promise_type {
+        std::promise<R> p;
+        suspend_never initial_suspend() { return {}; }
+        // error: the expression 'co_await __promise.final_suspend()' is required to be non-throwing
+        // missing noexcept in suspend
+        suspend_never final_suspend() noexcept { return {}; }
+        void return_value(R v) {
+            p.set_value(v);
+        }
+        std::future<R> get_return_object() { return p.get_future(); }
+        void unhandled_exception() { p.set_exception(std::current_exception()); }
+    };
+};
+
+struct AsyncTimer {
+    static void scheduler_interrupt(int, siginfo_t*, void*) noexcept {
+        if (auto coro = stdx::coroutine_handle<>::from_address(frame)) {
+            coro.resume();
+        }
+    }
+
+   void setup_signals() noexcept {
+        struct sigaction action;
+        action.sa_sigaction = scheduler_interrupt;
+        sigemptyset(&action.sa_mask);
+        action.sa_flags = SA_RESTART | SA_SIGINFO;
+
+        sigemptyset(&signal_mask_set);
+        sigaddset(&signal_mask_set, SIGALRM);
+        auto rc = sigaction(SIGALRM, &action, nullptr);
+        assert(rc == 0);
+    }
+
+   static void setup_timer(long timer_us) noexcept {
+        timeval tv = {0, timer_us};
+        itimerval it = {tv, tv};
+        auto rc = setitimer(ITIMER_REAL, &it, nullptr);
+        assert(rc == 0);
+    }
+   // ill-formed with volatile
+    static void *frame;
+    sigset_t signal_mask_set;
+};
+ void *AsyncTimer::frame = nullptr;
+
 template<class T>
-using future = execution::executor_future_t<static_thread_pool::executor_type, T>;
+struct [[nodiscard]] DummyAwaitable {
+    void* frame;
+    T *value_ptr;
+    AsyncTimer timer;
+    static constexpr bool ready = false;
+
+    bool await_ready() {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        return ready;
+    }
+    void await_suspend(stdx::coroutine_handle<> coro) {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        frame = coro.address();
+        AsyncTimer::frame = frame;
+        // set one-shot timer which fire await_resume after 1s
+        timer.setup_signals();
+        timer.setup_timer(999'999);
+    }
+    std::tuple<T, bool> await_resume() {
+        std::cout << __PRETTY_FUNCTION__ << std::endl;
+        timer.setup_timer(0);
+        if (frame) {
+            if (auto coro = stdx::coroutine_handle<>::from_address(frame)) {
+                return {*reinterpret_cast<T*>(value_ptr), true}; // what about gcc and lack of rc?
+            }
+        }
+        return {{}, false};
+    }
+
+    ~DummyAwaitable() noexcept {
+         std::cout << __PRETTY_FUNCTION__ << std::endl;
+    }
+};
+
 template<class T>
-using promise = stdx::executors_v1::promise<T>;
+DummyAwaitable<T> suspension_point(T &value) noexcept {
+    return DummyAwaitable<T>{nullptr, &value};
+}
+
+std::future<std::tuple<int, bool>> fiber() {
+    auto x = 123;
+    auto y = co_await suspension_point(x);
+    // coroutine with suspension point need to co_return
+    std::cout << "...done after resuming" << std::endl;
+    co_return y;
+}
+
+void test_dummy_awaiter1() {
+    auto f = fiber();
+    std::cout << "start waiting 1s..." << std::endl;;
+    auto [value, ok] = f.get();
+    assert(ok && value == 123);
+}
+
+std::future<std::tuple<std::string, bool>> fiber2(const std::string &arg) {
+    // we keep pointer to string BUT it's destroyed immediately after suspension!
+    auto y = co_await suspension_point(arg);
+    // coroutine with suspension point need to co_return
+    // at this point y is NOT ok AND arg is NOT alive anymore!
+    std::cout << std::get<0>(y) << std::endl;
+    co_return y;
+}
+
+void test_dummy_awaiter2() {
+    using namespace std::string_literals;
+    auto f = fiber2("Veni vidi vici, veni vidi vici"s);
+    std::cout << "start waiting 1s..." << std::endl;;
+    auto [value, ok] = f.get();
+    assert(ok && value != "Veni vidi vici, veni vidi vici");
+}
+
+ bool p() {
+      return true;
+ }
+
+std::future<std::tuple<int, bool>> bar(int x) {
+        auto y = co_await suspension_point(x);
+        co_return y;
+}
+
+ std::future<std::tuple<int, bool>> foo() {
+     if (p()) {
+         auto x = 4;
+         co_return co_await suspension_point(x);
+    } else {
+         auto y = 5;
+         co_return bar(y).get();
+    }
+}
+
+void test_dummy_awaiter3() {
+    auto [value, ok] = foo().get();
+    std::cout << value << std::endl;
+}
 
 namespace co_return_basics {
 
@@ -294,6 +450,7 @@ static auto test2() {
 /*
  * Awaiter type implements the 3 methods that are called as part of a co_await expression: await_ready, await_suspend and await_resume
  */
+#if 0
 namespace co_await_basics {
 
 static_thread_pool _pool{1};
@@ -360,6 +517,7 @@ static std::future<int> test() {
     co_return 0;
 }
 }
+#endif
 
 /*
  * The Compromise Executors Proposal: A lazy simplification of P0443
@@ -470,79 +628,79 @@ static auto test() {
 
 }
 
-auto bye = -123;
+//auto bye = -123;
 
-std::future<int> producer(channel<int>& ch) {
-    auto msg = 1;
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(1s);
-    co_await ch.write(msg);
-    co_return 0;
-}
+//std::future<int> producer(channel<int>& ch) {
+//    auto msg = 1;
+//    using namespace std::chrono_literals;
+//    std::this_thread::sleep_for(1s);
+//    co_await ch.write(msg);
+//    co_return 0;
+//}
 
-std::future<int> ok_consumer(channel<int>& ch) {
-    auto [msg, ok] = co_await ch.read();
-    std::cout << msg << std::endl;
-    co_return 0;
-}
+//std::future<int> ok_consumer(channel<int>& ch) {
+//    auto [msg, ok] = co_await ch.read();
+//    std::cout << msg << std::endl;
+//    co_return 0;
+//}
 
-std::future<int> producer2(channel<int>& ch) {
-    auto msg = 1;
-    co_await ch.write(msg);
-    co_await ch.write(bye);
-    co_return 0;
-}
+//std::future<int> producer2(channel<int>& ch) {
+//    auto msg = 1;
+//    co_await ch.write(msg);
+//    co_await ch.write(bye);
+//    co_return 0;
+//}
 
-std::future<int> ok_consumer2(channel<int>& ch) {
-    for (auto [msg, ok] = co_await ch.read(); ok && msg != bye;
-         std::tie(msg, ok) = co_await ch.read()) {
-            std::cout << msg << std::endl;
-    }
-    co_return 0;
-}
+//std::future<int> ok_consumer2(channel<int>& ch) {
+//    for (auto [msg, ok] = co_await ch.read(); ok && msg != bye;
+//         std::tie(msg, ok) = co_await ch.read()) {
+//            std::cout << msg << std::endl;
+//    }
+//    co_return 0;
+//}
 
-channel<int, std::mutex> _channel;
+//channel<int, std::mutex> _channel;
 
-static void test_channel_with_suspending_reader() {
-    std::cout << __PRETTY_FUNCTION__ << std::endl;
-    std::thread p([]{
-        producer(_channel).get();
-    });
+//static void test_channel_with_suspending_reader() {
+//    std::cout << __PRETTY_FUNCTION__ << std::endl;
+//    std::thread p([]{
+//        producer(_channel).get();
+//    });
 
-    std::thread c([]{
-        ok_consumer(_channel).get();
-    });
-    p.join();
-    c.join();
-}
+//    std::thread c([]{
+//        ok_consumer(_channel).get();
+//    });
+//    p.join();
+//    c.join();
+//}
 
-static void test_channel_with_suspending_writer() {
-    std::cout << __PRETTY_FUNCTION__ << std::endl;
-    std::thread p([]{
-        producer2(_channel).get();
-    });
+//static void test_channel_with_suspending_writer() {
+//    std::cout << __PRETTY_FUNCTION__ << std::endl;
+//    std::thread p([]{
+//        producer2(_channel).get();
+//    });
 
-    std::thread c([]{
-        ok_consumer2(_channel).get();
-    });
-    p.join();
-    c.join();
-}
+//    std::thread c([]{
+//        ok_consumer2(_channel).get();
+//    });
+//    p.join();
+//    c.join();
+//}
 
-static std::future<int> no_threads() {
-    std::cout << __PRETTY_FUNCTION__ << std::endl;
+//static std::future<int> no_threads() {
+//    std::cout << __PRETTY_FUNCTION__ << std::endl;
 
-    // fiber 1
-    auto [rmsg, ok] = co_await _channel.read();
-    std::cout << "Read done " << rmsg << std::endl;
-    // fiber 2
-    // I need cooperative multitasking between both
-    auto msg = 1;
-    co_await _channel.write(msg);
-    std::cout << "Write done " << std::endl;
+//    // fiber 1
+//    auto [rmsg, ok] = co_await _channel.read();
+//    std::cout << "Read done " << rmsg << std::endl;
+//    // fiber 2
+//    // I need cooperative multitasking between both
+//    auto msg = 1;
+//    co_await _channel.write(msg);
+//    std::cout << "Write done " << std::endl;
 
-    co_return 0;
-}
+//    co_return 0;
+//}
 
 // #include <https://raw.githubusercontent.com/Quuxplusone/coro/master/include/coro/unique_generator.h>
 namespace dangling_reference_issue {
@@ -619,68 +777,69 @@ static auto test_nok3() {
 
 }
 
-std::promise<bool> done;
-std::future<bool> donef = done.get_future();
+//std::promise<bool> done;
+//std::future<bool> donef = done.get_future();
 
-void fiber1() {
-    auto task = []() -> std::future<int> {
-       std::cout << "thread1: start" << std::endl;
-       auto [msg, ok] = co_await _channel.read();
-       std::cout << msg << std::endl;
-       std::cout << "thread1: end" << std::endl;
-       co_return 0;
-    };
-    task().get();
-    done.set_value(true);
-}
+//void fiber1() {
+//    auto task = []() -> std::future<int> {
+//       std::cout << "thread1: start" << std::endl;
+//       auto [msg, ok] = co_await _channel.read();
+//       std::cout << msg << std::endl;
+//       std::cout << "thread1: end" << std::endl;
+//       co_return 0;
+//    };
+//    task().get();
+//    done.set_value(true);
+//}
 
-void fiber2() {
-   auto task = []() -> std::future<int> {
-       std::cout << "thread2: start" << std::endl;
-       auto msg = 1;
-       co_await _channel.write(msg);
-       std::cout << "thread2: end" << std::endl;
-       co_return 0;
-   };
-   task().get();
-   donef.get();
-}
+//void fiber2() {
+//   auto task = []() -> std::future<int> {
+//       std::cout << "thread2: start" << std::endl;
+//       auto msg = 1;
+//       co_await _channel.write(msg);
+//       std::cout << "thread2: end" << std::endl;
+//       co_return 0;
+//   };
+//   task().get();
+//   donef.get();
+//}
 
 
-// ref: https://gist.github.com/DanGe42/7148946
-namespace scheduler_with_coroutines_demo {
+//// ref: https://gist.github.com/DanGe42/7148946
+//namespace scheduler_with_coroutines_demo {
 
-std::promise<bool> done;
-std::future<bool> donef = done.get_future();
+//std::promise<bool> done;
+//std::future<bool> donef = done.get_future();
 
-void fiber1() {
-    auto task = []() -> std::future<int> {
-       std::cout << "fiber1: start" << std::endl;
-       auto [msg, ok] = co_await _channel.read();
-       std::cout << msg << std::endl;
-       std::cout << "fiber1: end" << std::endl;
-       co_return 0;
-    };
-    task().get();
-    done.set_value(true);
-}
+//void fiber1() {
+//    auto task = []() -> std::future<int> {
+//       std::cout << "fiber1: start" << std::endl;
+//       auto [msg, ok] = co_await _channel.read();
+//       std::cout << msg << std::endl;
+//       std::cout << "fiber1: end" << std::endl;
+//       co_return 0;
+//    };
+//    task().get();
+//    done.set_value(true);
+//}
 
-void fiber2() {
-   auto task = []() -> std::future<int> {
-       std::cout << "fiber2: start" << std::endl;
-       auto msg = 1;
-       co_await _channel.write(msg);
-       std::cout << "fiber2: end" << std::endl;
-       co_return 0;
-   };
-   task().get();
-   donef.get();
-}
+//void fiber2() {
+//   auto task = []() -> std::future<int> {
+//       std::cout << "fiber2: start" << std::endl;
+//       auto msg = 1;
+//       co_await _channel.write(msg);
+//       std::cout << "fiber2: end" << std::endl;
+//       co_return 0;
+//   };
+//   task().get();
+//   donef.get();
+//}
 
-static void test() {
-    cooperative_scheduler{fiber1, fiber2};
-}
-}
+//static void test() {
+//    cooperative_scheduler{fiber1, fiber2};
+//}
+//}
+
 
 int main() {
     //co_await_basics::test().get();
@@ -688,6 +847,9 @@ int main() {
 //    test_channel_with_suspending_writer();
     //assert(co_yield_basics::test2() == 1190);
    // no_threads().get();
-    scheduler_with_coroutines_demo::test();
+    //scheduler_with_coroutines_demo::test();
+    test_dummy_awaiter1();
+    test_dummy_awaiter2();
+    test_dummy_awaiter3();
     return 0;
 }

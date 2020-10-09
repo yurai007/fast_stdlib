@@ -81,11 +81,13 @@ Problem:
 11 operator()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                scheduler_channel_tests.cc 140  0x560c78e96268
 12 channels::fiber2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          scheduler_channel_tests.cc 147  0x560c78e965a5
 ?
+Solution: missing -lpthread cause promise::set_value fail, https://stackoverflow.com/questions/58489617/c-promise-set-value-fails-with-unknown-error-under-linux
+
 
 frame_ptr
 
 TO DO:
-- some stb co_await without channels
+- some stub co_await without channels
 - gdb coroutines helpers (convinience funcs/pretty printers)?
 */
 
